@@ -12,9 +12,9 @@
 // Uses the React 18 UMD globals (window.React / window.ReactDOM), served
 // from the hermetic @react_umd repositories next to this bundle.
 
-import { resolveImageSource } from "./raster.js?v=529879892";
-import { SYMBOLS } from "./symbols.js?v=529879892";
-import { storeFiles } from "./imported_files.js?v=529879892";
+import { resolveImageSource } from "./raster.js?v=291613469";
+import { SYMBOLS } from "./symbols.js?v=291613469";
+import { storeFiles } from "./imported_files.js?v=291613469";
 
 /// An SF Symbol drawn from the portable table as an inline SVG sized to
 /// the text it stands in (an `Image(systemName:)` is a text node carrying
@@ -1607,11 +1607,20 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
       // Document-scrolled, the bar is in the page's flow (sticky): no inset.
       if (!container || !bar || fixed) return undefined;
       const name = edge === "top" ? "--uui-inset-top" : "--uui-inset-bottom";
-      const apply = () => container.style.setProperty(name, `${bar.getBoundingClientRect().height}px`);
+      const apply = () => {
+        container.style.setProperty(name, `${bar.getBoundingClientRect().height}px`);
+        // The scroll's inset changed without the scroll or its rows changing
+        // size (the keyboard came up under a composer): a scroll pinned to
+        // its end takes the end again, after the new inset.
+        window.dispatchEvent(new Event("uui-insets"));
+      };
       apply();
       if (typeof ResizeObserver === "undefined") return undefined;
       const observer = new ResizeObserver(apply);
-      observer.observe(bar);
+      // Its border box: the keyboard coming up grows the bar's bottom padding
+      // (it sits on the keyboard), which a content-box observer never sees,
+      // and the scroll's inset stayed short of the keyboard.
+      observer.observe(bar, { box: "border-box" });
       return () => observer.disconnect();
     }, [edge, fixed]);
     const contentIndex = edge === "top" ? 1 : 0;
@@ -1848,10 +1857,12 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
       }
       const viewport = window.visualViewport;
       if (viewport) viewport.addEventListener("resize", pin);
+      window.addEventListener("uui-insets", pin);
       return () => {
         observer.current = null;
         if (watch) watch.disconnect();
         if (viewport) viewport.removeEventListener("resize", pin);
+        window.removeEventListener("uui-insets", pin);
       };
     }, [doc]);
     return h("div", {
