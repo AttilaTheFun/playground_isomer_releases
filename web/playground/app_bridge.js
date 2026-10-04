@@ -12,9 +12,9 @@
 //
 // The shared runtime (swift_ffi/runtime/ts) is staged next to this file
 // by the wasm library macro; bridges in one directory share the one copy.
-import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=3704163152";
+import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=2218025898";
 // Re-exported so consumers keep importing them from this module.
-export { Types } from "./swift_ffi_runtime.js?v=3704163152";
+export { Types } from "./swift_ffi_runtime.js?v=2218025898";
 /** The runtime type token for `TextMetrics` (generic calls). */
 export const TextMetricsType = {
     encode(w, v) {
@@ -1529,6 +1529,19 @@ export class SwiftWebHost {
         if (failure !== null)
             throw new SwiftError(failure);
     }
+    registerImage(source, bytes) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        Types.string.encode(w, source);
+        Types.bytes.encode(w, bytes);
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 16, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+    }
 }
 /** Wraps a consumer-implemented `WebHost` as the ordinal
  * dispatcher Swift's foreign proxy calls (method ordinal leads the
@@ -1616,6 +1629,12 @@ export function makeDispatcher_WebHost(impl, runtime) {
             case 15: {
                 const a0 = Types.bytes.decode(r);
                 impl.renderTree(a0);
+                return new Uint8Array(0);
+            }
+            case 16: {
+                const a0 = Types.string.decode(r);
+                const a1 = Types.bytes.decode(r);
+                impl.registerImage(a0, a1);
                 return new Uint8Array(0);
             }
         }
@@ -2341,6 +2360,14 @@ export class SwiftUI {
         this.runtime.call("swift_ffi_uuiHostEvent", b0.ptr, b0.len, b1.ptr, b1.len);
         b0.drop();
         b1.drop();
+    }
+    uuiKeyEvent(id, value) {
+        const b0 = stageString(this.runtime, id);
+        const b1 = stageString(this.runtime, value);
+        const r = this.runtime.call("swift_ffi_uuiKeyEvent", b0.ptr, b0.len, b1.ptr, b1.len);
+        b0.drop();
+        b1.drop();
+        return r !== 0;
     }
     installPlaygroundHost(host) {
         const f0 = host instanceof SwiftPlaygroundHostService ? [host.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_PlaygroundHostService(host, () => this.runtime))];
