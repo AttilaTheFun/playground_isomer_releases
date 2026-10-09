@@ -464,6 +464,7 @@ export async function linkWithToolchain(toolchain, object, reuse = null) {
   linkArgs.push("--no-whole-archive", "--export-all", "--no-gc-sections", "-z", "stack-size=16777216",
     T(sdk.resourceDir) + "/wasi/wasm32/swiftrt.o",
     "-lswiftCore", "-lswiftSwiftOnoneSupport", "-lswiftWASILibc", "-lswift_Concurrency", "-lswift_RegexParser", "-lswift_StringProcessing",
+    "-lswiftObservation", "-lswiftSynchronization",
     "-lc++", "-lc++abi", "-ldl", "-lm", "-lwasi-emulated-mman", "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks",
     "--global-base=4096", "--table-base=4096", "-lc", T(sdk.resourceDir) + "/clang/lib/wasip1/libclang_rt.builtins-wasm32.a",
     "-o", "/work/UserApp.wasm");
