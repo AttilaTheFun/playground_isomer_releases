@@ -12,9 +12,9 @@
 // Uses the React 18 UMD globals (window.React / window.ReactDOM), served
 // from the hermetic @react_umd repositories next to this bundle.
 
-import { resolveImageSource } from "./raster.js?v=1405507922";
-import { SYMBOLS } from "./symbols.js?v=1405507922";
-import { storeFiles } from "./imported_files.js?v=1405507922";
+import { resolveImageSource } from "./raster.js?v=3680560776";
+import { SYMBOLS } from "./symbols.js?v=3680560776";
+import { storeFiles } from "./imported_files.js?v=3680560776";
 
 /// An SF Symbol drawn from the portable table as an inline SVG sized to
 /// the text it stands in (an `Image(systemName:)` is a text node carrying
@@ -100,12 +100,15 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
       ".uui-switch:checked::after{left:20px}" +
       // iOS inset-grouped list: rows in rounded groups on the grouped
       // background, separators inset from the leading edge, the last row of
-      // a group (before a header, or at the end) closing it.
+      // a group (before a header, or at the end) closing it. The groups are
+      // rounded as iOS 26 rounds them: 26px, the circle that fits the
+      // simulator's corner (10px was the radius before Liquid Glass); a
+      // one-row group comes out a capsule, as there.
       ".uui-ig{padding:12px 16px 24px;box-sizing:border-box;display:flex;flex-direction:column;align-self:stretch;width:100%}" +
       ".uui-ig-row{background:var(--uui-cell-bg,#fff);position:relative}" +
       ".uui-ig-row::after{content:'';position:absolute;left:16px;right:0;bottom:0;height:1px;background:var(--uui-separator,rgba(60,60,67,0.29))}" +
-      ".uui-ig-row:first-child,.uui-ig-header+.uui-ig-row{border-top-left-radius:10px;border-top-right-radius:10px}" +
-      ".uui-ig-row:last-child,.uui-ig-row:has(+ .uui-ig-header){border-bottom-left-radius:10px;border-bottom-right-radius:10px}" +
+      ".uui-ig-row:first-child,.uui-ig-header+.uui-ig-row{border-top-left-radius:26px;border-top-right-radius:26px}" +
+      ".uui-ig-row:last-child,.uui-ig-row:has(+ .uui-ig-header){border-bottom-left-radius:26px;border-bottom-right-radius:26px}" +
       ".uui-ig-row:last-child::after,.uui-ig-row:has(+ .uui-ig-header)::after{display:none}" +
       // Headers as iOS 26 draws them: sentence case, secondary, a step
       // smaller than the rows.
@@ -1600,7 +1603,8 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
   // stack), or null when the content is not a scroll.
   function edgeScroll(n) {
     let node = n;
-    for (let depth = 0; node && depth < 10; depth++) {
+    // (Deep enough for a screen's modifiers: see ComposeRenderer's.)
+    for (let depth = 0; node && depth < 32; depth++) {
       if (node.k === "scroll") return node.axis === "h" ? null : node;
       const p = node.params || {};
       // `.background` / `.overlay` layers ride alongside the content.
@@ -1972,6 +1976,16 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
           ? options.map((title, i) => ({ title, checked: i === selected, index: i }))
           : options.slice(1).map((title, i) => ({ title, index: i + 1 }));
         const openIt = (e) => { e.stopPropagation(); showPopMenu(e.currentTarget, items, (i) => sendEvent(n.edit, String(items[i].index))); };
+        // A Menu with a label of the app's own (a symbol in a circle) is that
+        // label, as SwiftUI draws it: no chip around it, no chevrons (those
+        // are a picker's).
+        if (!isPicker && p.labelContent === "1" && kids && kids.length) {
+          return h("button", {
+            ...props, type: "button", onClick: openIt,
+            style: { ...props.style, display: "inline-flex", alignItems: "center", padding: 0, border: "none",
+              background: "none", color: "inherit", cursor: "pointer" },
+          }, kids[0]);
+        }
         return h("button", {
           ...props, type: "button", onClick: openIt,
           style: { ...props.style, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 15, padding: "6px 10px", borderRadius: 10,
@@ -2276,7 +2290,7 @@ export function createReactTreeRenderer({ container, sendEvent, sendKey = (id, v
   // through plain wrappers and a navigation stack.
   function backdropFill(start) {
     let node = start;
-    for (let depth = 0; node && depth < 10; depth++) {
+    for (let depth = 0; node && depth < 32; depth++) {
       const ch = (node.ch || []).filter((c) => !(c.params && c.params.layer));
       if (node.k === "hostView" && node.view === "navstack") { node = ch[0]; continue; }
       if (node.k === "stack" && node.axis === "z") {
