@@ -12,9 +12,9 @@
 //
 // The shared runtime (swift_ffi/runtime/ts) is staged next to this file
 // by the wasm library macro; bridges in one directory share the one copy.
-import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=1354866856";
+import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=1549260247";
 // Re-exported so consumers keep importing them from this module.
-export { Types } from "./swift_ffi_runtime.js?v=1354866856";
+export { Types } from "./swift_ffi_runtime.js?v=1549260247";
 /** The runtime type token for `HTTPHostResponse` (generic calls). */
 export const HTTPHostResponseType = {
     encode(w, v) {

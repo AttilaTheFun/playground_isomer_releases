@@ -3,6 +3,7 @@ import SwiftUI
 import Isomer
 import Observation
 import Foundation
+import PlatformServices
 
 @main
 struct MemeCreatorApp: App {
