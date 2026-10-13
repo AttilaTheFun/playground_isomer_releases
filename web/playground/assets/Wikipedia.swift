@@ -1,7 +1,8 @@
 // Wikipedia — as a Playground project. Same source as the example apps'.
 import SwiftUI
-import SwiftUIExtensions
-import PlatformServices
+import Isomer
+import Observation
+import Foundation
 
 @main
 struct WikipediaApp: App {
@@ -21,11 +22,11 @@ struct Article: Identifiable, Hashable {
     let thumbnail: String?
 }
 
-final class FeedModel: ObservableObject {
+@Observable final class FeedModel {
     static let defaultQuery = "Space exploration"
 
-    @Published var articles: [Article] = []
-    @Published var isLoading = false
+    var articles: [Article] = []
+    var isLoading = false
 
     /// The most recent query we asked for; used to drop stale responses that
     /// arrive out of order while the user is typing.
@@ -69,7 +70,7 @@ final class FeedModel: ObservableObject {
 /// Wikipedia feed screen, designed to drop into a shared NavigationStack (the
 /// Apps tab) so it pushes article detail onto the same stack.
 struct WikipediaScreen: View {
-    @StateObject private var model = FeedModel()
+    @State private var model = FeedModel()
     @State private var query = ""
 
     var body: some View {
@@ -159,9 +160,9 @@ struct Paragraph: Identifiable {
 }
 
 /// Fetches an article's full plain-text body from the Wikipedia extracts API.
-final class ArticleLoader: ObservableObject {
-    @Published var paragraphs: [Paragraph] = []
-    @Published var loading = false
+@Observable final class ArticleLoader {
+    var paragraphs: [Paragraph] = []
+    var loading = false
     private var loadedID: Int?
 
     func load(id: Int) {
@@ -192,7 +193,7 @@ final class ArticleLoader: ObservableObject {
 
 struct ArticleView: View {
     let article: Article
-    @StateObject private var loader = ArticleLoader()
+    @State private var loader = ArticleLoader()
 
     var body: some View {
         ScrollView {
@@ -290,23 +291,26 @@ private func hexByte(_ byte: UInt8) -> String {
     return String(digits[Int(byte >> 4)]) + String(digits[Int(byte & 0xF)])
 }
 
-// How the example app reaches the host-injected platform services
-// (shared/platform_services): a text-fetch helper over `NetworkService`
-// (async, with a completion form the models use), and a text file store
-// over the sandboxed `FileService`. The same code runs compiled (Apple /
-// Linux / Windows / Android) and as a wasm reactor under every host — only
-// the host's implementation differs.
+// How the example app reaches the network and its files: Foundation's own,
+// as an app on Apple platforms does. `URLSession` goes through the host's
+// networking (the browser's fetch on the web, Android's own client, Apple's
+// URLSession in a WasmView), and the app's files are FileManager's, in its
+// Application Support, which persists on every platform. The same code runs
+// compiled (Apple / Linux / Windows / Android) and as a wasm reactor under
+// every host.
 
 
-/// GET `url` and hand back the body as text. Absent service / failed
-/// request → nil (the models show their empty state).
+/// GET `url` and hand back the body as text. A failed request (or a status
+/// other than 2xx) throws; the completion form gives nil and the models show
+/// their empty state.
 enum Networking {
     static func fetchText(_ url: String) async throws -> String {
-        guard let service = PlatformDependencies.networking else {
-            throw PlatformServiceUnavailable("NetworkService")
+        guard let address = URL(string: url) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: address)
+        if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+            throw URLError(.badServerResponse)
         }
-        let bytes = try await service.request(url: url, method: "GET")
-        return String(decoding: bytes, as: UTF8.self)
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Completion form, delivered on the main actor (where the models mutate
@@ -322,20 +326,23 @@ enum Networking {
     }
 }
 
-/// Text files in the app's sandbox over the injected `FileService`; falls
-/// back to process memory when no host injects one.
+/// Text files in the app's Application Support (FileManager's).
 enum SandboxFiles {
-    nonisolated(unsafe) private static var memory: [String: String] = [:]
+    private static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("example_application", isDirectory: true)
+    }
 
     static func read(_ name: String) -> String? {
-        guard let files = PlatformDependencies.file else { return memory[name] }
-        guard files.exists(path: name), let bytes = try? files.read(path: name) else { return nil }
-        return String(decoding: bytes, as: UTF8.self)
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(name, isDirectory: false)) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static func write(_ name: String, _ contents: String) {
-        guard let files = PlatformDependencies.file else { memory[name] = contents; return }
-        _ = files.write(path: name, contents: Array(contents.utf8))
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Data(contents.utf8).write(to: directory.appendingPathComponent(name, isDirectory: false))
     }
 }
 

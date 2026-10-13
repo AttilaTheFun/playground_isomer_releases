@@ -1,4 +1,4 @@
-// The compile worker: turns App.swift into a runnable uui_hot reactor.
+// The compile worker: turns App.swift into a runnable iso_hot reactor.
 //
 // Backends, tried in order:
 //   1. In-browser toolchain — `toolchain/manifest.json` beside the site lists
@@ -55,11 +55,11 @@ async function loadToolchain() {
     // STREAMING straight from the (inflated) response — the browser's code
     // cache then keys on the URL and skips the ~100 MB compile on later
     // loads — and kept as WebAssembly.Module objects, not bytes.
-    const cacheName = "uui-toolchain-v" + version;
+    const cacheName = "iso-toolchain-v" + version;
     if (self.caches) {
       // Earlier toolchains' compilers (~150 MB each) go.
       for (const name of await caches.keys()) {
-        if (name.startsWith("uui-toolchain-") && name !== cacheName) await caches.delete(name);
+        if (name.startsWith("iso-toolchain-") && name !== cacheName) await caches.delete(name);
       }
     }
     const cache = await (self.caches ? caches.open(cacheName) : null);
@@ -112,7 +112,7 @@ async function compileInBrowser(source) {
   // Wired when tools/browser_toolchain produces the bundle: instantiate
   // swift-frontend.wasm with a WASI shim + virtual FS (resource dir, SDK
   // modules, work/main.swift), run `-frontend -c …`, then wasm-ld.wasm.
-  const { compileWithToolchain } = await import("./toolchain_driver.js?v=3836754679");
+  const { compileWithToolchain } = await import("./toolchain_driver.js?v=1882615545");
   return compileWithToolchain(toolchain, source);
 }
 

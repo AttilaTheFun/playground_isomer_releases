@@ -1,20 +1,21 @@
 // Pokédex — as a Playground project. Same source as the example apps'.
 import SwiftUI
-import SwiftUIExtensions
-import PlatformServices
+import Isomer
+import Observation
+import Foundation
 
 @main
 struct PokedexApp: App {
-    @StateObject private var pokedex = PokedexStore()
+    @State private var pokedex = PokedexStore()
     var body: some Scene {
-        WindowGroup { NavigationStack { PokedexScreen() }.environmentObject(pokedex) }
+        WindowGroup { NavigationStack { PokedexScreen() }.environment(pokedex) }
     }
 }
 
-// The Pokédex mini-app: a list/search interface over https://pokeapi.co, a
-// detail page per Pokémon, and a "caught" record persisted to device storage
-// through the shared `FileService` abstraction. All business logic here is
-// platform-agnostic; only the FileService implementation differs per platform.
+// The Pokédex mini-app: a list/search interface over https://pokeapi.co
+// (URLSession), a detail page per Pokémon, and a "caught" record persisted to
+// the app's files (FileManager). All of it is platform-agnostic: the same
+// Foundation calls on every platform.
 
 
 // MARK: - Models
@@ -37,10 +38,9 @@ struct PokemonRef: Identifiable, Hashable {
 // MARK: - Persisted "caught" record (shared business logic)
 
 /// Records which game versions each Pokémon has been caught in, persisted as a
-/// JSON file via the injected `FileService` (Foundation on Apple, host-backed
-/// on web/Android).
-final class PokedexStore: ObservableObject {
-    @Published private(set) var caught: [Int: Set<String>] = [:]
+/// JSON file in Application Support (`SandboxFiles`, over FileManager).
+@Observable final class PokedexStore {
+    private(set) var caught: [Int: Set<String>] = [:]
     init() {
         load()
     }
@@ -88,9 +88,9 @@ final class PokedexStore: ObservableObject {
 
 // MARK: - List + search
 
-final class PokemonListModel: ObservableObject {
-    @Published private(set) var all: [PokemonRef] = []
-    @Published private(set) var loading = false
+@Observable final class PokemonListModel {
+    private(set) var all: [PokemonRef] = []
+    private(set) var loading = false
     private var requested = false
 
     func loadIfNeeded() {
@@ -121,7 +121,7 @@ final class PokemonListModel: ObservableObject {
 /// Pokédex list screen, designed to drop into a shared NavigationStack (the
 /// Apps tab) so it pushes detail onto the same stack.
 struct PokedexScreen: View {
-    @StateObject private var model = PokemonListModel()
+    @State private var model = PokemonListModel()
     @State private var query = ""
 
     var body: some View {
@@ -155,7 +155,7 @@ struct PokedexScreen: View {
 
 struct PokemonRow: View {
     let pokemon: PokemonRef
-    @EnvironmentObject var pokedex: PokedexStore
+    @Environment(PokedexStore.self) private var pokedex
 
     var body: some View {
         HStack(spacing: 12) {
@@ -188,12 +188,12 @@ struct PokemonRow: View {
 
 // MARK: - Detail
 
-final class PokemonDetailModel: ObservableObject {
-    @Published var loading = false
-    @Published var types: [String] = []
-    @Published var games: [String] = []
-    @Published var heightM = 0.0
-    @Published var weightKg = 0.0
+@Observable final class PokemonDetailModel {
+    var loading = false
+    var types: [String] = []
+    var games: [String] = []
+    var heightM = 0.0
+    var weightKg = 0.0
     private var loadedID: Int?
 
     func load(id: Int) {
@@ -221,8 +221,8 @@ final class PokemonDetailModel: ObservableObject {
 
 struct PokemonDetailView: View {
     let pokemon: PokemonRef
-    @StateObject private var model = PokemonDetailModel()
-    @EnvironmentObject var pokedex: PokedexStore
+    @State private var model = PokemonDetailModel()
+    @Environment(PokedexStore.self) private var pokedex
 
     var body: some View {
         List {
@@ -298,7 +298,7 @@ struct PokemonDetailView: View {
 struct GameRow: View {
     let game: String
     let pokemonID: Int
-    @EnvironmentObject var pokedex: PokedexStore
+    @Environment(PokedexStore.self) private var pokedex
 
     var body: some View {
         let caught = pokedex.isCaught(pokemonID, game: game)
@@ -362,23 +362,26 @@ func typeColor(_ type: String) -> Color {
     }
 }
 
-// How the example app reaches the host-injected platform services
-// (shared/platform_services): a text-fetch helper over `NetworkService`
-// (async, with a completion form the models use), and a text file store
-// over the sandboxed `FileService`. The same code runs compiled (Apple /
-// Linux / Windows / Android) and as a wasm reactor under every host — only
-// the host's implementation differs.
+// How the example app reaches the network and its files: Foundation's own,
+// as an app on Apple platforms does. `URLSession` goes through the host's
+// networking (the browser's fetch on the web, Android's own client, Apple's
+// URLSession in a WasmView), and the app's files are FileManager's, in its
+// Application Support, which persists on every platform. The same code runs
+// compiled (Apple / Linux / Windows / Android) and as a wasm reactor under
+// every host.
 
 
-/// GET `url` and hand back the body as text. Absent service / failed
-/// request → nil (the models show their empty state).
+/// GET `url` and hand back the body as text. A failed request (or a status
+/// other than 2xx) throws; the completion form gives nil and the models show
+/// their empty state.
 enum Networking {
     static func fetchText(_ url: String) async throws -> String {
-        guard let service = PlatformDependencies.networking else {
-            throw PlatformServiceUnavailable("NetworkService")
+        guard let address = URL(string: url) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: address)
+        if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+            throw URLError(.badServerResponse)
         }
-        let bytes = try await service.request(url: url, method: "GET")
-        return String(decoding: bytes, as: UTF8.self)
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Completion form, delivered on the main actor (where the models mutate
@@ -394,20 +397,23 @@ enum Networking {
     }
 }
 
-/// Text files in the app's sandbox over the injected `FileService`; falls
-/// back to process memory when no host injects one.
+/// Text files in the app's Application Support (FileManager's).
 enum SandboxFiles {
-    nonisolated(unsafe) private static var memory: [String: String] = [:]
+    private static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("example_application", isDirectory: true)
+    }
 
     static func read(_ name: String) -> String? {
-        guard let files = PlatformDependencies.file else { return memory[name] }
-        guard files.exists(path: name), let bytes = try? files.read(path: name) else { return nil }
-        return String(decoding: bytes, as: UTF8.self)
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(name, isDirectory: false)) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static func write(_ name: String, _ contents: String) {
-        guard let files = PlatformDependencies.file else { memory[name] = contents; return }
-        _ = files.write(path: name, contents: Array(contents.utf8))
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Data(contents.utf8).write(to: directory.appendingPathComponent(name, isDirectory: false))
     }
 }
 

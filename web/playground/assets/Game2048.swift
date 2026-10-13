@@ -1,6 +1,7 @@
 // 2048 — as a Playground project. Same source as the example apps'.
 import SwiftUI
-import SwiftUIExtensions
+import Isomer
+import Observation
 
 @main
 struct Game2048App: App {
@@ -317,7 +318,8 @@ struct Game2048Screen: View {
         tiles = updated
         score += gained
         if score > best { best = score }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
             tiles.removeAll { $0.merging }
         }
         spawn(from: direction)
@@ -358,7 +360,7 @@ struct Game2048Screen: View {
         spawnNumber += 1
         if entering != nil {
             // Let the tile render off-edge once, then slide it in.
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 withAnimation(.easeOut(duration: 0.2)) {
                     if let index = tiles.firstIndex(where: { $0.id == id }) { tiles[index].entering = nil }
                 }

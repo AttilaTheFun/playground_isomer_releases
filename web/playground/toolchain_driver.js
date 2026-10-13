@@ -91,8 +91,8 @@ export class WASI {
 
   get imports() {
     const w = this;
-    // UUI_WASI_TRACE=1 (Node) logs file opens/reads for debugging the FS.
-    const trace = typeof process !== "undefined" && process.env && process.env.UUI_WASI_TRACE ? (...a) => console.error("[wasi]", ...a) : null;
+    // ISO_WASI_TRACE=1 (Node) logs file opens/reads for debugging the FS.
+    const trace = typeof process !== "undefined" && process.env && process.env.ISO_WASI_TRACE ? (...a) => console.error("[wasi]", ...a) : null;
     const view = () => new DataView(w.memory.buffer);
     const bytes = () => new Uint8Array(w.memory.buffer);
     const readString = (ptr, len) => decoder.decode(bytes().subarray(ptr, ptr + len));
@@ -323,15 +323,23 @@ export class WASI {
         const entries = [{ name: ".", dir: true }, { name: "..", dir: true }, ...w.fs.list(entry.path)];
         let offset = 0; const v = view(); const b = bytes();
         for (let i = Number(cookie); i < entries.length; i++) {
+          // A dirent: d_next, d_ino, d_namlen, d_type, then the name.
           const name = encoder.encode(entries[i].name);
-          const size = 24 + name.length;
-          if (offset + size > bufLen) { offset = bufLen; break; }
-          v.setBigUint64(bufPtr + offset, BigInt(i + 1), true);
-          v.setBigUint64(bufPtr + offset + 8, BigInt(hash(entry.path + "/" + entries[i].name)), true);
-          v.setUint32(bufPtr + offset + 16, name.length, true);
-          v.setUint8(bufPtr + offset + 20, entries[i].dir ? FILETYPE.DIRECTORY : FILETYPE.REGULAR_FILE);
-          b.set(name, bufPtr + offset + 24);
-          offset += size;
+          const dirent = new Uint8Array(24 + name.length);
+          const d = new DataView(dirent.buffer);
+          d.setBigUint64(0, BigInt(i + 1), true);
+          d.setBigUint64(8, BigInt(hash(entry.path + "/" + entries[i].name)), true);
+          d.setUint32(16, name.length, true);
+          d.setUint8(20, entries[i].dir ? FILETYPE.DIRECTORY : FILETYPE.REGULAR_FILE);
+          dirent.set(name, 24);
+          // One that does not fit goes in as far as it does (WASI's rule):
+          // the reader sees its length, grows its buffer and asks again from
+          // the entry before. Claiming the buffer full without it left the
+          // reader parsing stale bytes as an entry, forever.
+          const take = Math.min(dirent.length, bufLen - offset);
+          b.set(dirent.subarray(0, take), bufPtr + offset);
+          offset += take;
+          if (take < dirent.length) break;
         }
         writeU32(usedPtr, offset);
         return ERRNO.SUCCESS;
@@ -351,7 +359,13 @@ export class WASI {
         w.fs.delete(from); w.fs.put(to, data);
         return ERRNO.SUCCESS;
       },
-      path_readlink() { return ERRNO.NOSYS; },
+      // No symlinks here: an existing path is not one (readlink's EINVAL,
+      // which realpath expects), a missing one is missing.
+      path_readlink(dirFD, ptr, len) {
+        const path = resolve(dirFD, ptr, len);
+        if (path === null) return ERRNO.BADF;
+        return w.fs.has(path) || w.fs.isDir(path) ? ERRNO.INVAL : ERRNO.NOENT;
+      },
       path_symlink() { return ERRNO.NOSYS; },
       path_link() { return ERRNO.NOSYS; },
       fd_advise() { return ERRNO.SUCCESS; },
@@ -364,9 +378,10 @@ export class WASI {
 
   preopenPath(path) { for (const e of this.fds.values()) if (e.kind === "dir" && e.preopen && (e.path === path || e.path.startsWith(path + "/"))) return true; return false; }
 
-  /** Instantiates `module` and runs `_start`; returns the exit code. */
-  run(module) {
-    const instance = new WebAssembly.Instance(module, { wasi_snapshot_preview1: this.imports });
+  /** Instantiates `module` and runs `_start`; returns the exit code.
+   *  `extra` adds import modules (the compiler's `iso_plugin`). */
+  run(module, extra = {}) {
+    const instance = new WebAssembly.Instance(module, { ...extra, wasi_snapshot_preview1: this.imports });
     this.memory = instance.exports.memory;
     try {
       instance.exports._start();
@@ -378,6 +393,143 @@ export class WASI {
       for (const fd of [1, 2]) { const s = this.fds.get(fd); if (s && s.buffer) { this.onOutput(fd, s.buffer); s.buffer = ""; } }
     }
   }
+}
+
+// --- Macro plugins -----------------------------------------------------------
+// The compiler runs no processes, so `-load-plugin-executable <path>#<modules>`
+// names a wasm module in the bundle: a macro plugin built for wasm32-wasip1
+// (build_macro_plugins.sh), whose `main` registers swift-syntax's handler and
+// whose `swift_wasm_macro_v1_pump` answers one request from its stdin on its
+// stdout. The compiler (swift-wasi-plugins.patch) reaches it through these
+// `iso_plugin` imports: `write` gives it the compiler's framed request (an
+// 8-byte little-endian length, then JSON), the plugin is pumped once a whole
+// request is in, and `read` hands its framed answer back.
+
+const pluginModules = new Map(); // bundle path -> WebAssembly.Module, kept by the worker
+
+class PluginExit { constructor(code) { this.code = code; } }
+
+/** One plugin instance: its stdin (the request being answered) and stdout. */
+function startPlugin(bytes, path, log) {
+  let module = pluginModules.get(path);
+  if (!module) { module = new WebAssembly.Module(bytes); pluginModules.set(path, module); }
+  let memory = null, stdin = new Uint8Array(0), stdinAt = 0;
+  const stdout = [];
+  const view = () => new DataView(memory.buffer);
+  const iovecs = (iov, count, each) => {
+    let total = 0;
+    for (let i = 0; i < count; i++) {
+      const done = each(view().getUint32(iov + i * 8, true), view().getUint32(iov + i * 8 + 4, true));
+      total += done;
+      if (done < view().getUint32(iov + i * 8 + 4, true)) break;
+    }
+    return total;
+  };
+  const wasi = {
+    args_sizes_get(count, size) { view().setUint32(count, 0, true); view().setUint32(size, 0, true); return 0; },
+    args_get() { return 0; },
+    environ_sizes_get(count, size) { view().setUint32(count, 0, true); view().setUint32(size, 0, true); return 0; },
+    environ_get() { return 0; },
+    clock_time_get(id, precision, out) { view().setBigUint64(out, BigInt(Math.round(performance.now() * 1e6)), true); return 0; },
+    clock_res_get(id, out) { view().setBigUint64(out, 1000n, true); return 0; },
+    fd_close() { return 0; },
+    fd_fdstat_get(fd, out) {
+      new Uint8Array(memory.buffer, out, 24).fill(0);
+      view().setUint8(out, 2); // a character device: the plugin's stdio
+      return fd <= 2 ? 0 : 8;
+    },
+    fd_filestat_get() { return 8; },
+    fd_prestat_get() { return 8; },
+    fd_prestat_dir_name() { return 8; },
+    fd_seek() { return 70; },
+    path_open() { return 76; },
+    poll_oneoff() { return 52; },
+    sched_yield() { return 0; },
+    random_get(ptr, length) { crypto.getRandomValues(new Uint8Array(memory.buffer, ptr, length)); return 0; },
+    proc_exit(code) { throw new PluginExit(code); },
+    fd_read(fd, iov, count, nread) {
+      if (fd !== 0) return 8;
+      view().setUint32(nread, iovecs(iov, count, (ptr, length) => {
+        const take = Math.min(length, stdin.length - stdinAt);
+        new Uint8Array(memory.buffer, ptr, take).set(stdin.subarray(stdinAt, stdinAt + take));
+        stdinAt += take;
+        return take;
+      }), true);
+      return 0;
+    },
+    fd_write(fd, iov, count, nwritten) {
+      view().setUint32(nwritten, iovecs(iov, count, (ptr, length) => {
+        const chunk = new Uint8Array(memory.buffer, ptr, length).slice();
+        if (fd === 1) stdout.push(chunk); else log(decoder.decode(chunk));
+        return length;
+      }), true);
+      return 0;
+    },
+  };
+  // Anything else a plugin imports answers "not supported".
+  const imports = new Proxy(wasi, { get: (target, name) => target[name] || (() => 52) });
+  const instance = new WebAssembly.Instance(module, { wasi_snapshot_preview1: imports });
+  memory = instance.exports.memory;
+  try { instance.exports._start(); } catch (error) { if (!(error instanceof PluginExit)) throw error; }
+  return {
+    /** Answers one framed request; returns the framed answer. */
+    answer(request) {
+      stdin = request; stdinAt = 0; stdout.length = 0;
+      instance.exports.swift_wasm_macro_v1_pump();
+      const out = new Uint8Array(stdout.reduce((n, c) => n + c.length, 0));
+      let at = 0;
+      for (const chunk of stdout) { out.set(chunk, at); at += chunk.length; }
+      return out;
+    },
+  };
+}
+
+/** The `iso_plugin` imports for one compile: plugins read from `fs`. */
+function pluginImports(fs, compilerMemory, log) {
+  const trace = typeof process !== "undefined" && process.env && process.env.ISO_PLUGIN_TRACE ? (...a) => console.error("[plugin]", ...a) : () => {};
+  const plugins = new Map(); // handle -> { plugin, pending, answers, dead }
+  let next = 1;
+  const bytesAt = (ptr, length) => new Uint8Array(compilerMemory().buffer, ptr, length);
+  const concat = (a, b) => { const out = new Uint8Array(a.length + b.length); out.set(a, 0); out.set(b, a.length); return out; };
+  return {
+    open(ptr, length) {
+      const path = decoder.decode(bytesAt(ptr, length).slice());
+      trace("open", path);
+      const bytes = fs.get(path);
+      if (!bytes) { log(`plugin not found: ${path}`); return -1; }
+      try {
+        const handle = next++;
+        plugins.set(handle, { plugin: startPlugin(bytes, path, log), pending: new Uint8Array(0), answers: new Uint8Array(0), dead: false });
+        return handle;
+      } catch (error) { log(`plugin ${path} did not start: ${error}`); return -1; }
+    },
+    write(handle, ptr, length) {
+      const entry = plugins.get(handle);
+      trace("write", handle, length);
+      if (!entry || entry.dead) return -1;
+      entry.pending = concat(entry.pending, bytesAt(ptr, length).slice());
+      while (entry.pending.length >= 8) {
+        const size = Number(new DataView(entry.pending.buffer, entry.pending.byteOffset).getBigUint64(0, true));
+        if (entry.pending.length < 8 + size) break;
+        const request = entry.pending.slice(0, 8 + size);
+        entry.pending = entry.pending.slice(8 + size);
+        if (size === 0) { entry.dead = true; break; } // the compiler's goodbye
+        try { entry.answers = concat(entry.answers, entry.plugin.answer(request)); }
+        catch (error) { log(`plugin failed: ${error}`); entry.dead = true; return -1; }
+      }
+      return length;
+    },
+    read(handle, ptr, length) {
+      const entry = plugins.get(handle);
+      trace("read", handle, length, entry && entry.answers.length);
+      if (!entry) return -1;
+      const take = Math.min(length, entry.answers.length);
+      bytesAt(ptr, take).set(entry.answers.subarray(0, take));
+      entry.answers = entry.answers.slice(take);
+      return take;
+    },
+    close(handle) { plugins.delete(handle); },
+  };
 }
 
 function hash(text) { let h = 2166136261; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
@@ -437,8 +589,13 @@ export async function compileWithToolchain(toolchain, source) {
     if (entry.modulemap) frontendArgs.push("-Xcc", "-fmodule-map-file=" + T(entry.modulemap));
     if (entry.include) frontendArgs.push("-Xcc", "-I", "-Xcc", T(entry.include));
   }
+  // Macros: each plugin the bundle carries, for the modules it serves.
+  for (const plugin of manifest.plugins || []) {
+    frontendArgs.push("-load-plugin-executable", T(plugin.path) + "#" + plugin.modules.join(","));
+  }
   let wasi = new WASI({ fs, args: frontendArgs, env: { HOME: "/work", TMPDIR: "/work" }, onOutput });
-  let code = wasi.run(frontend);
+  const plugins = pluginImports(fs, () => wasi.memory, (line) => onOutput(2, line));
+  let code = wasi.run(frontend, { iso_plugin: plugins });
   if (code !== 0 || !fs.has("/work/UserApp.o")) {
     return { ok: false, diagnostics: output.join("\n").replaceAll("/work/", "") || `swift-frontend exited with ${code}` };
   }
@@ -461,11 +618,17 @@ export async function linkWithToolchain(toolchain, object, reuse = null) {
   const linkArgs = ["wasm-ld", "-m", "wasm32", "-L" + T(sdk.resourceDir) + "/wasi", "-L" + T(sdk.sysroot) + "/lib/wasm32-wasip1",
     T(sdk.sysroot) + "/lib/wasm32-wasip1/crt1-reactor.o", "--entry", "_initialize", "/work/UserApp.o", "--whole-archive"];
   for (const archive of sdk.archives) linkArgs.push(T(archive));
-  linkArgs.push("--no-whole-archive", "--export-all", "--no-gc-sections", "-z", "stack-size=16777216",
+  linkArgs.push("--no-whole-archive");
+  // The hosts' entries exported and the rest dead-stripped, as isomer ships
+  // its reactors (Foundation would otherwise be all there); an SDK without
+  // the list exports everything.
+  if (sdk.exports) linkArgs.push("--gc-sections", ...sdk.exports.map((name) => "--export-if-defined=" + name));
+  else linkArgs.push("--export-all", "--no-gc-sections");
+  linkArgs.push("-z", "stack-size=16777216",
     T(sdk.resourceDir) + "/wasi/wasm32/swiftrt.o",
     "-lswiftCore", "-lswiftSwiftOnoneSupport", "-lswiftWASILibc", "-lswift_Concurrency", "-lswift_RegexParser", "-lswift_StringProcessing",
     "-lswiftObservation", "-lswiftSynchronization",
-    "-lc++", "-lc++abi", "-ldl", "-lm", "-lwasi-emulated-mman", "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks",
+    "-lc++", "-lc++abi", "-ldl", "-lm", "-lwasi-emulated-mman", "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks", "-lwasi-emulated-getpid",
     "--global-base=4096", "--table-base=4096", "-lc", T(sdk.resourceDir) + "/clang/lib/wasip1/libclang_rt.builtins-wasm32.a",
     "-o", "/work/UserApp.wasm");
   const wasi = new WASI({ fs, args: linkArgs, env: { HOME: "/work" }, onOutput });

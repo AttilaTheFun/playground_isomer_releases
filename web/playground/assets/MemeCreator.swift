@@ -1,7 +1,8 @@
 // Meme Creator — as a Playground project. Same source as the example apps'.
 import SwiftUI
-import SwiftUIExtensions
-import PlatformServices
+import Isomer
+import Observation
+import Foundation
 
 @main
 struct MemeCreatorApp: App {
@@ -141,23 +142,26 @@ struct MemeCreatorScreen: View {
     }
 }
 
-// How the example app reaches the host-injected platform services
-// (shared/platform_services): a text-fetch helper over `NetworkService`
-// (async, with a completion form the models use), and a text file store
-// over the sandboxed `FileService`. The same code runs compiled (Apple /
-// Linux / Windows / Android) and as a wasm reactor under every host — only
-// the host's implementation differs.
+// How the example app reaches the network and its files: Foundation's own,
+// as an app on Apple platforms does. `URLSession` goes through the host's
+// networking (the browser's fetch on the web, Android's own client, Apple's
+// URLSession in a WasmView), and the app's files are FileManager's, in its
+// Application Support, which persists on every platform. The same code runs
+// compiled (Apple / Linux / Windows / Android) and as a wasm reactor under
+// every host.
 
 
-/// GET `url` and hand back the body as text. Absent service / failed
-/// request → nil (the models show their empty state).
+/// GET `url` and hand back the body as text. A failed request (or a status
+/// other than 2xx) throws; the completion form gives nil and the models show
+/// their empty state.
 enum Networking {
     static func fetchText(_ url: String) async throws -> String {
-        guard let service = PlatformDependencies.networking else {
-            throw PlatformServiceUnavailable("NetworkService")
+        guard let address = URL(string: url) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: address)
+        if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
+            throw URLError(.badServerResponse)
         }
-        let bytes = try await service.request(url: url, method: "GET")
-        return String(decoding: bytes, as: UTF8.self)
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Completion form, delivered on the main actor (where the models mutate
@@ -173,20 +177,23 @@ enum Networking {
     }
 }
 
-/// Text files in the app's sandbox over the injected `FileService`; falls
-/// back to process memory when no host injects one.
+/// Text files in the app's Application Support (FileManager's).
 enum SandboxFiles {
-    nonisolated(unsafe) private static var memory: [String: String] = [:]
+    private static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("example_application", isDirectory: true)
+    }
 
     static func read(_ name: String) -> String? {
-        guard let files = PlatformDependencies.file else { return memory[name] }
-        guard files.exists(path: name), let bytes = try? files.read(path: name) else { return nil }
-        return String(decoding: bytes, as: UTF8.self)
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(name, isDirectory: false)) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static func write(_ name: String, _ contents: String) {
-        guard let files = PlatformDependencies.file else { memory[name] = contents; return }
-        _ = files.write(path: name, contents: Array(contents.utf8))
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? Data(contents.utf8).write(to: directory.appendingPathComponent(name, isDirectory: false))
     }
 }
 

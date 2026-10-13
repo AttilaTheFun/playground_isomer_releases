@@ -2,7 +2,7 @@
 // through hot_host.js (the same generic browser host the iOS Playground's
 // web run uses), with a Stop bar. Logs (load status + guest print()) are kept
 // for the agent's `logs` tool.
-import { runHotBundle } from "./hot_host.js?v=3836754679";
+import { runHotBundle } from "./hot_host.js?v=1882615545";
 
 export function createRunner({ dependencies }) {
   let overlay = null;
@@ -58,7 +58,9 @@ export function createRunner({ dependencies }) {
     return overlay;
   }
 
-  async function run(wasm) {
+  // `bundleIdentifier` names the build's home: its files (FileManager's,
+  // kept in IndexedDB) and UserDefaults, one per project.
+  async function run(wasm, bundleIdentifier) {
     stop();
     lines = [];
     container.innerHTML = "";
@@ -69,6 +71,7 @@ export function createRunner({ dependencies }) {
         wasm,
         container,
         dependencies,
+        bundleIdentifier,
         onLog: (line) => log(line),
         onStatus: (status) => log("[status] " + status),
       });

@@ -12,9 +12,59 @@
 //
 // The shared runtime (swift_ffi/runtime/ts) is staged next to this file
 // by the wasm library macro; bridges in one directory share the one copy.
-import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=4061885736";
+import { BlobReader, BlobWriter, Runtime, SwiftError, Tags, Types, decodeWith, decoder, encodeError, encodeErrorBlob, encodeWith, errorMessageOf, foreignObjects, nextCallId, pendingCalls, registerForeign, registry, resumeAsync, stageBytes, stageString, takeBytes, wasiShim, } from "./swift_ffi_runtime.js?v=1354866856";
 // Re-exported so consumers keep importing them from this module.
-export { Types } from "./swift_ffi_runtime.js?v=4061885736";
+export { Types } from "./swift_ffi_runtime.js?v=1354866856";
+/** The runtime type token for `HTTPHostResponse` (generic calls). */
+export const HTTPHostResponseType = {
+    encode(w, v) {
+        w.typeHeader(Tags.struct, "HTTPHostResponse");
+        w.i64(4n);
+        Types.int32.encode(w, v.status);
+        Types.string.encode(w, v.headers);
+        Types.bytes.encode(w, v.body);
+        Types.string.encode(w, v.url);
+    },
+    decode(r) {
+        const tag = r.i32();
+        const aux = r.i32();
+        if (tag !== Tags.struct)
+            throw new SwiftError("expected HTTPHostResponse");
+        if (aux > 0)
+            r.bytes(aux);
+        r.i64();
+        const status = Types.int32.decode(r);
+        const headers = Types.string.decode(r);
+        const body = Types.bytes.decode(r);
+        const url = Types.string.decode(r);
+        return { status, headers, body, url };
+    },
+};
+/** The runtime type token for `WebSocketHostEvent` (generic calls). */
+export const WebSocketHostEventType = {
+    encode(w, v) {
+        w.typeHeader(Tags.struct, "WebSocketHostEvent");
+        w.i64(4n);
+        Types.int32.encode(w, v.kind);
+        Types.string.encode(w, v.text);
+        Types.bytes.encode(w, v.data);
+        Types.int32.encode(w, v.code);
+    },
+    decode(r) {
+        const tag = r.i32();
+        const aux = r.i32();
+        if (tag !== Tags.struct)
+            throw new SwiftError("expected WebSocketHostEvent");
+        if (aux > 0)
+            r.bytes(aux);
+        r.i64();
+        const kind = Types.int32.decode(r);
+        const text = Types.string.decode(r);
+        const data = Types.bytes.decode(r);
+        const code = Types.int32.decode(r);
+        return { kind, text, data, code };
+    },
+};
 /** The runtime type token for `TextMetrics` (generic calls). */
 export const TextMetricsType = {
     encode(w, v) {
@@ -59,27 +109,6 @@ export const ImageInfoValueType = {
         return { state, width, height };
     },
 };
-/** The runtime type token for `StoredValue` (generic calls). */
-export const StoredValueType = {
-    encode(w, v) {
-        w.typeHeader(Tags.struct, "StoredValue");
-        w.i64(2n);
-        Types.bool.encode(w, v.exists);
-        Types.string.encode(w, v.contents);
-    },
-    decode(r) {
-        const tag = r.i32();
-        const aux = r.i32();
-        if (tag !== Tags.struct)
-            throw new SwiftError("expected StoredValue");
-        if (aux > 0)
-            r.bytes(aux);
-        r.i64();
-        const exists = Types.bool.decode(r);
-        const contents = Types.string.decode(r);
-        return { exists, contents };
-    },
-};
 export const PlatformDependencyKeyType = {
     encode(w, v) {
         Types.string.encode(w, v);
@@ -88,316 +117,14 @@ export const PlatformDependencyKeyType = {
         return Types.string.decode(r);
     },
 };
-export class SwiftNetworkService {
-    handle;
-    runtime;
-    /** @internal Takes ownership of a +1 handle. */
-    constructor(runtime, handle) {
-        this.runtime = runtime;
-        this.handle = handle;
-        registry.register(this, () => runtime.call("swift_ffi_platform_services_NetworkService_release", handle), this);
-    }
-    /** @internal */
-    borrowHandle() {
-        if (this.handle === 0)
-            throw new Error("NetworkService used after close()");
-        return this.handle;
-    }
-    /** Releases the underlying Swift instance. Idempotent. */
-    close() {
-        if (this.handle !== 0) {
-            registry.unregister(this);
-            this.runtime.call("swift_ffi_platform_services_NetworkService_release", this.handle);
-            this.handle = 0;
-        }
-    }
-    [Symbol.dispose]() {
-        this.close();
-    }
-    request(url, method) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        const callId = nextCallId();
-        Types.int32.encode(w, callId);
-        Types.string.encode(w, url);
-        Types.string.encode(w, method);
-        const promise = new Promise((resolve, reject) => {
-            pendingCalls.set(callId, {
-                resolve: resolve,
-                decode: (blob) => {
-                    const failure = errorMessageOf(blob);
-                    if (failure !== null) {
-                        reject(new SwiftError(failure));
-                        return undefined;
-                    }
-                    return decodeWith(Types.bytes, blob);
-                },
-            });
-        });
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_NetworkService_invoke", handle, 0, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return promise;
-    }
-    send(url, method, headers, body) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        const callId = nextCallId();
-        Types.int32.encode(w, callId);
-        Types.string.encode(w, url);
-        Types.string.encode(w, method);
-        Types.string.encode(w, headers);
-        Types.bytes.encode(w, body);
-        const promise = new Promise((resolve, reject) => {
-            pendingCalls.set(callId, {
-                resolve: resolve,
-                decode: (blob) => {
-                    const failure = errorMessageOf(blob);
-                    if (failure !== null) {
-                        reject(new SwiftError(failure));
-                        return undefined;
-                    }
-                    return decodeWith(Types.bytes, blob);
-                },
-            });
-        });
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_NetworkService_invoke", handle, 1, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return promise;
-    }
-    perform(url, method, headers, body) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        const callId = nextCallId();
-        Types.int32.encode(w, callId);
-        Types.string.encode(w, url);
-        Types.string.encode(w, method);
-        Types.string.encode(w, headers);
-        Types.bytes.encode(w, body);
-        const promise = new Promise((resolve, reject) => {
-            pendingCalls.set(callId, {
-                resolve: resolve,
-                decode: (blob) => {
-                    const failure = errorMessageOf(blob);
-                    if (failure !== null) {
-                        reject(new SwiftError(failure));
-                        return undefined;
-                    }
-                    return decodeWith(Types.bytes, blob);
-                },
-            });
-        });
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_NetworkService_invoke", handle, 2, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return promise;
-    }
-}
-/** Wraps a consumer-implemented `NetworkService` as the ordinal
- * dispatcher Swift's foreign proxy calls (method ordinal leads the
- * arguments). */
-export function makeDispatcher_NetworkService(impl, runtime) {
-    return (args) => {
-        const r = new BlobReader(args);
-        switch (Types.int32.decode(r)) {
-            case 0: {
-                const callId = Types.int32.decode(r);
-                const a0 = Types.string.decode(r);
-                const a1 = Types.string.decode(r);
-                if (!runtime)
-                    throw new SwiftError("NetworkService.request is async and needs a runtime-bound dispatcher");
-                const rt = runtime;
-                Promise.resolve().then(() => impl.request(a0, a1)).then((value) => resumeAsync(rt(), callId, encodeWith(Types.bytes, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
-                return new Uint8Array(0);
-            }
-            case 1: {
-                const callId = Types.int32.decode(r);
-                const a0 = Types.string.decode(r);
-                const a1 = Types.string.decode(r);
-                const a2 = Types.string.decode(r);
-                const a3 = Types.bytes.decode(r);
-                if (!runtime)
-                    throw new SwiftError("NetworkService.send is async and needs a runtime-bound dispatcher");
-                const rt = runtime;
-                Promise.resolve().then(() => impl.send(a0, a1, a2, a3)).then((value) => resumeAsync(rt(), callId, encodeWith(Types.bytes, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
-                return new Uint8Array(0);
-            }
-            case 2: {
-                const callId = Types.int32.decode(r);
-                const a0 = Types.string.decode(r);
-                const a1 = Types.string.decode(r);
-                const a2 = Types.string.decode(r);
-                const a3 = Types.bytes.decode(r);
-                if (!runtime)
-                    throw new SwiftError("NetworkService.perform is async and needs a runtime-bound dispatcher");
-                const rt = runtime;
-                Promise.resolve().then(() => impl.perform(a0, a1, a2, a3)).then((value) => resumeAsync(rt(), callId, encodeWith(Types.bytes, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
-                return new Uint8Array(0);
-            }
-        }
-        throw new SwiftError("unknown NetworkService method ordinal");
-    };
-}
-export class SwiftFileService {
-    handle;
-    runtime;
-    /** @internal Takes ownership of a +1 handle. */
-    constructor(runtime, handle) {
-        this.runtime = runtime;
-        this.handle = handle;
-        registry.register(this, () => runtime.call("swift_ffi_platform_services_FileService_release", handle), this);
-    }
-    /** @internal */
-    borrowHandle() {
-        if (this.handle === 0)
-            throw new Error("FileService used after close()");
-        return this.handle;
-    }
-    /** Releases the underlying Swift instance. Idempotent. */
-    close() {
-        if (this.handle !== 0) {
-            registry.unregister(this);
-            this.runtime.call("swift_ffi_platform_services_FileService_release", this.handle);
-            this.handle = 0;
-        }
-    }
-    [Symbol.dispose]() {
-        this.close();
-    }
-    list(path) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 0, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.array(Types.string), result);
-    }
-    exists(path) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 1, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.bool, result);
-    }
-    read(path) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 2, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.bytes, result);
-    }
-    write(path, contents) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        Types.bytes.encode(w, contents);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 3, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.bool, result);
-    }
-    delete(path) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 4, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.bool, result);
-    }
-    url(path) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, path);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_FileService_invoke", handle, 5, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.string, result);
-    }
-}
-/** Wraps a consumer-implemented `FileService` as the ordinal
- * dispatcher Swift's foreign proxy calls (method ordinal leads the
- * arguments). */
-export function makeDispatcher_FileService(impl, runtime) {
-    return (args) => {
-        const r = new BlobReader(args);
-        switch (Types.int32.decode(r)) {
-            case 0: {
-                const a0 = Types.string.decode(r);
-                return encodeWith(Types.array(Types.string), impl.list(a0));
-            }
-            case 1: {
-                const a0 = Types.string.decode(r);
-                return encodeWith(Types.bool, impl.exists(a0));
-            }
-            case 2: {
-                const a0 = Types.string.decode(r);
-                try {
-                    return encodeWith(Types.bytes, impl.read(a0));
-                }
-                catch (error) {
-                    return encodeError(error instanceof Error ? error.message : String(error));
-                }
-            }
-            case 3: {
-                const a0 = Types.string.decode(r);
-                const a1 = Types.bytes.decode(r);
-                return encodeWith(Types.bool, impl.write(a0, a1));
-            }
-            case 4: {
-                const a0 = Types.string.decode(r);
-                return encodeWith(Types.bool, impl.delete(a0));
-            }
-            case 5: {
-                const a0 = Types.string.decode(r);
-                return encodeWith(Types.string, impl.url(a0));
-            }
-        }
-        throw new SwiftError("unknown FileService method ordinal");
-    };
-}
+export const NetworkHostKeyType = {
+    encode(w, v) {
+        Types.string.encode(w, v);
+    },
+    decode(r) {
+        return Types.string.decode(r);
+    },
+};
 export class SwiftKeychainService {
     handle;
     runtime;
@@ -807,80 +534,6 @@ export function makeDispatcher_DeviceMotionService(impl, runtime) {
         throw new SwiftError("unknown DeviceMotionService method ordinal");
     };
 }
-export class SwiftPreferencesService {
-    handle;
-    runtime;
-    /** @internal Takes ownership of a +1 handle. */
-    constructor(runtime, handle) {
-        this.runtime = runtime;
-        this.handle = handle;
-        registry.register(this, () => runtime.call("swift_ffi_platform_services_PreferencesService_release", handle), this);
-    }
-    /** @internal */
-    borrowHandle() {
-        if (this.handle === 0)
-            throw new Error("PreferencesService used after close()");
-        return this.handle;
-    }
-    /** Releases the underlying Swift instance. Idempotent. */
-    close() {
-        if (this.handle !== 0) {
-            registry.unregister(this);
-            this.runtime.call("swift_ffi_platform_services_PreferencesService_release", this.handle);
-            this.handle = 0;
-        }
-    }
-    [Symbol.dispose]() {
-        this.close();
-    }
-    get(key) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, key);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_PreferencesService_invoke", handle, 0, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(Types.string, result);
-    }
-    set(key, value) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, key);
-        Types.string.encode(w, value);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_platform_services_PreferencesService_invoke", handle, 1, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-}
-/** Wraps a consumer-implemented `PreferencesService` as the ordinal
- * dispatcher Swift's foreign proxy calls (method ordinal leads the
- * arguments). */
-export function makeDispatcher_PreferencesService(impl, runtime) {
-    return (args) => {
-        const r = new BlobReader(args);
-        switch (Types.int32.decode(r)) {
-            case 0: {
-                const a0 = Types.string.decode(r);
-                return encodeWith(Types.string, impl.get(a0));
-            }
-            case 1: {
-                const a0 = Types.string.decode(r);
-                const a1 = Types.string.decode(r);
-                impl.set(a0, a1);
-                return new Uint8Array(0);
-            }
-        }
-        throw new SwiftError("unknown PreferencesService method ordinal");
-    };
-}
 export class SwiftTimerService {
     handle;
     runtime;
@@ -1066,154 +719,253 @@ export function makeDispatcher_OAuthService(impl, runtime) {
         throw new SwiftError("unknown OAuthService method ordinal");
     };
 }
-export class SwiftGPUWebHost {
+export class SwiftHTTPHost {
     handle;
     runtime;
     /** @internal Takes ownership of a +1 handle. */
     constructor(runtime, handle) {
         this.runtime = runtime;
         this.handle = handle;
-        registry.register(this, () => runtime.call("swift_ffi_GPUWebHost_release", handle), this);
+        registry.register(this, () => runtime.call("swift_ffi_isomer_HTTPHost_release", handle), this);
     }
     /** @internal */
     borrowHandle() {
         if (this.handle === 0)
-            throw new Error("GPUWebHost used after close()");
+            throw new Error("HTTPHost used after close()");
         return this.handle;
     }
     /** Releases the underlying Swift instance. Idempotent. */
     close() {
         if (this.handle !== 0) {
             registry.unregister(this);
-            this.runtime.call("swift_ffi_GPUWebHost_release", this.handle);
+            this.runtime.call("swift_ffi_isomer_HTTPHost_release", this.handle);
             this.handle = 0;
         }
     }
     [Symbol.dispose]() {
         this.close();
     }
-    gpuCreateTexture(id, width, height, rgba) {
+    send(method, url, headers, body, timeout) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const callId = nextCallId();
+        Types.int32.encode(w, callId);
+        Types.string.encode(w, method);
+        Types.string.encode(w, url);
+        Types.string.encode(w, headers);
+        Types.bytes.encode(w, body);
+        Types.double.encode(w, timeout);
+        const promise = new Promise((resolve, reject) => {
+            pendingCalls.set(callId, {
+                resolve: resolve,
+                decode: (blob) => {
+                    const failure = errorMessageOf(blob);
+                    if (failure !== null) {
+                        reject(new SwiftError(failure));
+                        return undefined;
+                    }
+                    return decodeWith(HTTPHostResponseType, blob);
+                },
+            });
+        });
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_isomer_HTTPHost_invoke", handle, 0, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return promise;
+    }
+}
+/** Wraps a consumer-implemented `HTTPHost` as the ordinal
+ * dispatcher Swift's foreign proxy calls (method ordinal leads the
+ * arguments). */
+export function makeDispatcher_HTTPHost(impl, runtime) {
+    return (args) => {
+        const r = new BlobReader(args);
+        switch (Types.int32.decode(r)) {
+            case 0: {
+                const callId = Types.int32.decode(r);
+                const a0 = Types.string.decode(r);
+                const a1 = Types.string.decode(r);
+                const a2 = Types.string.decode(r);
+                const a3 = Types.bytes.decode(r);
+                const a4 = Types.double.decode(r);
+                if (!runtime)
+                    throw new SwiftError("HTTPHost.send is async and needs a runtime-bound dispatcher");
+                const rt = runtime;
+                Promise.resolve().then(() => impl.send(a0, a1, a2, a3, a4)).then((value) => resumeAsync(rt(), callId, encodeWith(HTTPHostResponseType, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
+                return new Uint8Array(0);
+            }
+        }
+        throw new SwiftError("unknown HTTPHost method ordinal");
+    };
+}
+export class SwiftWebSocketHost {
+    handle;
+    runtime;
+    /** @internal Takes ownership of a +1 handle. */
+    constructor(runtime, handle) {
+        this.runtime = runtime;
+        this.handle = handle;
+        registry.register(this, () => runtime.call("swift_ffi_isomer_WebSocketHost_release", handle), this);
+    }
+    /** @internal */
+    borrowHandle() {
+        if (this.handle === 0)
+            throw new Error("WebSocketHost used after close()");
+        return this.handle;
+    }
+    /** Releases the underlying Swift instance. Idempotent. */
+    close() {
+        if (this.handle !== 0) {
+            registry.unregister(this);
+            this.runtime.call("swift_ffi_isomer_WebSocketHost_release", this.handle);
+            this.handle = 0;
+        }
+    }
+    [Symbol.dispose]() {
+        this.close();
+    }
+    open(url, protocols, headers, timeout) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const callId = nextCallId();
+        Types.int32.encode(w, callId);
+        Types.string.encode(w, url);
+        Types.string.encode(w, protocols);
+        Types.string.encode(w, headers);
+        Types.double.encode(w, timeout);
+        const promise = new Promise((resolve, reject) => {
+            pendingCalls.set(callId, {
+                resolve: resolve,
+                decode: (blob) => {
+                    const failure = errorMessageOf(blob);
+                    if (failure !== null) {
+                        reject(new SwiftError(failure));
+                        return undefined;
+                    }
+                    return decodeWith(Types.int32, blob);
+                },
+            });
+        });
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 0, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return promise;
+    }
+    subprotocol(id) {
         const handle = this.borrowHandle();
         const w = new BlobWriter();
         Types.int32.encode(w, id);
-        Types.int32.encode(w, width);
-        Types.int32.encode(w, height);
-        Types.bytes.encode(w, rgba);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 0, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 1, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
         if (failure !== null)
             throw new SwiftError(failure);
+        return decodeWith(Types.string, result);
     }
-    gpuDestroyTexture(id) {
+    sendText(id, text) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const callId = nextCallId();
+        Types.int32.encode(w, callId);
+        Types.int32.encode(w, id);
+        Types.string.encode(w, text);
+        const promise = new Promise((resolve, reject) => {
+            pendingCalls.set(callId, {
+                resolve: resolve,
+                decode: (blob) => {
+                    const failure = errorMessageOf(blob);
+                    if (failure !== null) {
+                        reject(new SwiftError(failure));
+                        return undefined;
+                    }
+                    return undefined;
+                },
+            });
+        });
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 2, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return promise;
+    }
+    sendData(id, data) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const callId = nextCallId();
+        Types.int32.encode(w, callId);
+        Types.int32.encode(w, id);
+        Types.bytes.encode(w, data);
+        const promise = new Promise((resolve, reject) => {
+            pendingCalls.set(callId, {
+                resolve: resolve,
+                decode: (blob) => {
+                    const failure = errorMessageOf(blob);
+                    if (failure !== null) {
+                        reject(new SwiftError(failure));
+                        return undefined;
+                    }
+                    return undefined;
+                },
+            });
+        });
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 3, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return promise;
+    }
+    next(id) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const callId = nextCallId();
+        Types.int32.encode(w, callId);
+        Types.int32.encode(w, id);
+        const promise = new Promise((resolve, reject) => {
+            pendingCalls.set(callId, {
+                resolve: resolve,
+                decode: (blob) => {
+                    const failure = errorMessageOf(blob);
+                    if (failure !== null) {
+                        reject(new SwiftError(failure));
+                        return undefined;
+                    }
+                    return decodeWith(WebSocketHostEventType, blob);
+                },
+            });
+        });
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 4, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return promise;
+    }
+    disconnect(id, code, reason) {
         const handle = this.borrowHandle();
         const w = new BlobWriter();
         Types.int32.encode(w, id);
+        Types.int32.encode(w, code);
+        Types.string.encode(w, reason);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 1, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuBeginFrame(red, green, blue, alpha) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.double.encode(w, red);
-        Types.double.encode(w, green);
-        Types.double.encode(w, blue);
-        Types.double.encode(w, alpha);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 2, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuSetTransform(matrix) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.bytes.encode(w, matrix);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 3, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuDrawTextured(id, vertices) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.int32.encode(w, id);
-        Types.bytes.encode(w, vertices);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 4, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuDrawColor(vertices) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.bytes.encode(w, vertices);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 5, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuDrawRects(vertices) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.bytes.encode(w, vertices);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 6, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuSetScissor(x, y, width, height) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.int32.encode(w, x);
-        Types.int32.encode(w, y);
-        Types.int32.encode(w, width);
-        Types.int32.encode(w, height);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 7, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuClearScissor() {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 8, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
-    gpuEndFrame() {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_GPUWebHost_invoke", handle, 9, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_isomer_WebSocketHost_invoke", handle, 5, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1221,73 +973,173 @@ export class SwiftGPUWebHost {
             throw new SwiftError(failure);
     }
 }
-/** Wraps a consumer-implemented `GPUWebHost` as the ordinal
+/** Wraps a consumer-implemented `WebSocketHost` as the ordinal
  * dispatcher Swift's foreign proxy calls (method ordinal leads the
  * arguments). */
-export function makeDispatcher_GPUWebHost(impl, runtime) {
+export function makeDispatcher_WebSocketHost(impl, runtime) {
     return (args) => {
         const r = new BlobReader(args);
         switch (Types.int32.decode(r)) {
             case 0: {
-                const a0 = Types.int32.decode(r);
-                const a1 = Types.int32.decode(r);
-                const a2 = Types.int32.decode(r);
-                const a3 = Types.bytes.decode(r);
-                impl.gpuCreateTexture(a0, a1, a2, a3);
+                const callId = Types.int32.decode(r);
+                const a0 = Types.string.decode(r);
+                const a1 = Types.string.decode(r);
+                const a2 = Types.string.decode(r);
+                const a3 = Types.double.decode(r);
+                if (!runtime)
+                    throw new SwiftError("WebSocketHost.open is async and needs a runtime-bound dispatcher");
+                const rt = runtime;
+                Promise.resolve().then(() => impl.open(a0, a1, a2, a3)).then((value) => resumeAsync(rt(), callId, encodeWith(Types.int32, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
                 return new Uint8Array(0);
             }
             case 1: {
                 const a0 = Types.int32.decode(r);
-                impl.gpuDestroyTexture(a0);
-                return new Uint8Array(0);
+                return encodeWith(Types.string, impl.subprotocol(a0));
             }
             case 2: {
-                const a0 = Types.double.decode(r);
-                const a1 = Types.double.decode(r);
-                const a2 = Types.double.decode(r);
-                const a3 = Types.double.decode(r);
-                impl.gpuBeginFrame(a0, a1, a2, a3);
+                const callId = Types.int32.decode(r);
+                const a0 = Types.int32.decode(r);
+                const a1 = Types.string.decode(r);
+                if (!runtime)
+                    throw new SwiftError("WebSocketHost.sendText is async and needs a runtime-bound dispatcher");
+                const rt = runtime;
+                Promise.resolve().then(() => impl.sendText(a0, a1)).then((value) => resumeAsync(rt(), callId, new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0])), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
                 return new Uint8Array(0);
             }
             case 3: {
-                const a0 = Types.bytes.decode(r);
-                impl.gpuSetTransform(a0);
+                const callId = Types.int32.decode(r);
+                const a0 = Types.int32.decode(r);
+                const a1 = Types.bytes.decode(r);
+                if (!runtime)
+                    throw new SwiftError("WebSocketHost.sendData is async and needs a runtime-bound dispatcher");
+                const rt = runtime;
+                Promise.resolve().then(() => impl.sendData(a0, a1)).then((value) => resumeAsync(rt(), callId, new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0])), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
                 return new Uint8Array(0);
             }
             case 4: {
+                const callId = Types.int32.decode(r);
                 const a0 = Types.int32.decode(r);
-                const a1 = Types.bytes.decode(r);
-                impl.gpuDrawTextured(a0, a1);
+                if (!runtime)
+                    throw new SwiftError("WebSocketHost.next is async and needs a runtime-bound dispatcher");
+                const rt = runtime;
+                Promise.resolve().then(() => impl.next(a0)).then((value) => resumeAsync(rt(), callId, encodeWith(WebSocketHostEventType, value)), (error) => resumeAsync(rt(), callId, encodeError(error instanceof Error ? error.message : String(error))));
                 return new Uint8Array(0);
             }
             case 5: {
-                const a0 = Types.bytes.decode(r);
-                impl.gpuDrawColor(a0);
-                return new Uint8Array(0);
-            }
-            case 6: {
-                const a0 = Types.bytes.decode(r);
-                impl.gpuDrawRects(a0);
-                return new Uint8Array(0);
-            }
-            case 7: {
                 const a0 = Types.int32.decode(r);
                 const a1 = Types.int32.decode(r);
-                const a2 = Types.int32.decode(r);
-                const a3 = Types.int32.decode(r);
-                impl.gpuSetScissor(a0, a1, a2, a3);
-                return new Uint8Array(0);
-            }
-            case 8: {
-                impl.gpuClearScissor();
-                return new Uint8Array(0);
-            }
-            case 9: {
-                impl.gpuEndFrame();
+                const a2 = Types.string.decode(r);
+                impl.disconnect(a0, a1, a2);
                 return new Uint8Array(0);
             }
         }
-        throw new SwiftError("unknown GPUWebHost method ordinal");
+        throw new SwiftError("unknown WebSocketHost method ordinal");
+    };
+}
+export class SwiftMetalWebHost {
+    handle;
+    runtime;
+    /** @internal Takes ownership of a +1 handle. */
+    constructor(runtime, handle) {
+        this.runtime = runtime;
+        this.handle = handle;
+        registry.register(this, () => runtime.call("swift_ffi_MetalWebHost_release", handle), this);
+    }
+    /** @internal */
+    borrowHandle() {
+        if (this.handle === 0)
+            throw new Error("MetalWebHost used after close()");
+        return this.handle;
+    }
+    /** Releases the underlying Swift instance. Idempotent. */
+    close() {
+        if (this.handle !== 0) {
+            registry.unregister(this);
+            this.runtime.call("swift_ffi_MetalWebHost_release", this.handle);
+            this.handle = 0;
+        }
+    }
+    [Symbol.dispose]() {
+        this.close();
+    }
+    metalPerform(commands, token) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        Types.bytes.encode(w, commands);
+        Types.int32.encode(w, token);
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_MetalWebHost_invoke", handle, 0, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+    }
+    metalSurfaceWidth(surface) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        Types.int32.encode(w, surface);
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_MetalWebHost_invoke", handle, 1, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return decodeWith(Types.int32, result);
+    }
+    metalSurfaceHeight(surface) {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        Types.int32.encode(w, surface);
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_MetalWebHost_invoke", handle, 2, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return decodeWith(Types.int32, result);
+    }
+    metalAdapterName() {
+        const handle = this.borrowHandle();
+        const w = new BlobWriter();
+        const staged = stageBytes(this.runtime, w.data());
+        const box = this.runtime.call("swift_ffi_MetalWebHost_invoke", handle, 3, staged.ptr, staged.len);
+        staged.drop();
+        const result = takeBytes(this.runtime, box);
+        const failure = errorMessageOf(result);
+        if (failure !== null)
+            throw new SwiftError(failure);
+        return decodeWith(Types.string, result);
+    }
+}
+/** Wraps a consumer-implemented `MetalWebHost` as the ordinal
+ * dispatcher Swift's foreign proxy calls (method ordinal leads the
+ * arguments). */
+export function makeDispatcher_MetalWebHost(impl, runtime) {
+    return (args) => {
+        const r = new BlobReader(args);
+        switch (Types.int32.decode(r)) {
+            case 0: {
+                const a0 = Types.bytes.decode(r);
+                const a1 = Types.int32.decode(r);
+                impl.metalPerform(a0, a1);
+                return new Uint8Array(0);
+            }
+            case 1: {
+                const a0 = Types.int32.decode(r);
+                return encodeWith(Types.int32, impl.metalSurfaceWidth(a0));
+            }
+            case 2: {
+                const a0 = Types.int32.decode(r);
+                return encodeWith(Types.int32, impl.metalSurfaceHeight(a0));
+            }
+            case 3: {
+                return encodeWith(Types.string, impl.metalAdapterName());
+            }
+        }
+        throw new SwiftError("unknown MetalWebHost method ordinal");
     };
 }
 export class SwiftWebHost {
@@ -1434,38 +1286,12 @@ export class SwiftWebHost {
             throw new SwiftError(failure);
         return decodeWith(Types.bytes, result);
     }
-    storageGet(key) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, key);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 9, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-        return decodeWith(StoredValueType, result);
-    }
-    storageSet(key, value) {
-        const handle = this.borrowHandle();
-        const w = new BlobWriter();
-        Types.string.encode(w, key);
-        Types.string.encode(w, value);
-        const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 10, staged.ptr, staged.len);
-        staged.drop();
-        const result = takeBytes(this.runtime, box);
-        const failure = errorMessageOf(result);
-        if (failure !== null)
-            throw new SwiftError(failure);
-    }
     log(message) {
         const handle = this.borrowHandle();
         const w = new BlobWriter();
         Types.string.encode(w, message);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 11, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 9, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1477,7 +1303,7 @@ export class SwiftWebHost {
         const w = new BlobWriter();
         Types.string.encode(w, url);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 12, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 10, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1490,7 +1316,7 @@ export class SwiftWebHost {
         Types.string.encode(w, key);
         Types.string.encode(w, value);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 13, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 11, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1501,7 +1327,7 @@ export class SwiftWebHost {
         const handle = this.borrowHandle();
         const w = new BlobWriter();
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 14, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 12, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1514,7 +1340,7 @@ export class SwiftWebHost {
         const w = new BlobWriter();
         Types.bytes.encode(w, tree);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 15, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 13, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1527,7 +1353,7 @@ export class SwiftWebHost {
         Types.string.encode(w, source);
         Types.bytes.encode(w, bytes);
         const staged = stageBytes(this.runtime, w.data());
-        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 16, staged.ptr, staged.len);
+        const box = this.runtime.call("swift_ffi_WebHost_invoke", handle, 14, staged.ptr, staged.len);
         staged.drop();
         const result = takeBytes(this.runtime, box);
         const failure = errorMessageOf(result);
@@ -1591,39 +1417,29 @@ export function makeDispatcher_WebHost(impl, runtime) {
             }
             case 9: {
                 const a0 = Types.string.decode(r);
-                return encodeWith(StoredValueType, impl.storageGet(a0));
-            }
-            case 10: {
-                const a0 = Types.string.decode(r);
-                const a1 = Types.string.decode(r);
-                impl.storageSet(a0, a1);
-                return new Uint8Array(0);
-            }
-            case 11: {
-                const a0 = Types.string.decode(r);
                 impl.log(a0);
                 return new Uint8Array(0);
             }
-            case 12: {
+            case 10: {
                 const a0 = Types.string.decode(r);
                 impl.openURL(a0);
                 return new Uint8Array(0);
             }
-            case 13: {
+            case 11: {
                 const a0 = Types.string.decode(r);
                 const a1 = Types.string.decode(r);
                 impl.platformCommand(a0, a1);
                 return new Uint8Array(0);
             }
-            case 14: {
+            case 12: {
                 return encodeWith(Types.double, impl.epochMillis());
             }
-            case 15: {
+            case 13: {
                 const a0 = Types.bytes.decode(r);
                 impl.renderTree(a0);
                 return new Uint8Array(0);
             }
-            case 16: {
+            case 14: {
                 const a0 = Types.string.decode(r);
                 const a1 = Types.bytes.decode(r);
                 impl.registerImage(a0, a1);
@@ -1635,30 +1451,6 @@ export function makeDispatcher_WebHost(impl, runtime) {
 }
 /** Builders wrapping host implementations for injection. */
 export const Dependencies = {
-    networkService: (provide, lazy = true) => {
-        let impl;
-        return {
-            key: "swift_ffi_platform_services_NetworkService",
-            lazy,
-            dispatcher: (args, runtime) => {
-                if (!impl)
-                    impl = provide();
-                return makeDispatcher_NetworkService(impl, runtime)(args);
-            },
-        };
-    },
-    fileService: (provide, lazy = true) => {
-        let impl;
-        return {
-            key: "swift_ffi_platform_services_FileService",
-            lazy,
-            dispatcher: (args, runtime) => {
-                if (!impl)
-                    impl = provide();
-                return makeDispatcher_FileService(impl, runtime)(args);
-            },
-        };
-    },
     keychainService: (provide, lazy = true) => {
         let impl;
         return {
@@ -1719,18 +1511,6 @@ export const Dependencies = {
             },
         };
     },
-    preferencesService: (provide, lazy = true) => {
-        let impl;
-        return {
-            key: "swift_ffi_platform_services_PreferencesService",
-            lazy,
-            dispatcher: (args, runtime) => {
-                if (!impl)
-                    impl = provide();
-                return makeDispatcher_PreferencesService(impl, runtime)(args);
-            },
-        };
-    },
     timerService: (provide, lazy = true) => {
         let impl;
         return {
@@ -1755,15 +1535,39 @@ export const Dependencies = {
             },
         };
     },
-    gPUWebHost: (provide, lazy = true) => {
+    hTTPHost: (provide, lazy = true) => {
         let impl;
         return {
-            key: "swift_ffi_GPUWebHost",
+            key: "swift_ffi_isomer_HTTPHost",
             lazy,
             dispatcher: (args, runtime) => {
                 if (!impl)
                     impl = provide();
-                return makeDispatcher_GPUWebHost(impl, runtime)(args);
+                return makeDispatcher_HTTPHost(impl, runtime)(args);
+            },
+        };
+    },
+    webSocketHost: (provide, lazy = true) => {
+        let impl;
+        return {
+            key: "swift_ffi_isomer_WebSocketHost",
+            lazy,
+            dispatcher: (args, runtime) => {
+                if (!impl)
+                    impl = provide();
+                return makeDispatcher_WebSocketHost(impl, runtime)(args);
+            },
+        };
+    },
+    metalWebHost: (provide, lazy = true) => {
+        let impl;
+        return {
+            key: "swift_ffi_MetalWebHost",
+            lazy,
+            dispatcher: (args, runtime) => {
+                if (!impl)
+                    impl = provide();
+                return makeDispatcher_MetalWebHost(impl, runtime)(args);
             },
         };
     },
@@ -1786,13 +1590,11 @@ export class SwiftUI {
     constructor(runtime) {
         this.runtime = runtime;
     }
-    installPlatformDependencies(networking, file, keychain, analytics, configuration) {
-        const f0 = networking instanceof SwiftNetworkService ? [networking.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_NetworkService(networking, () => this.runtime))];
-        const f1 = file instanceof SwiftFileService ? [file.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_FileService(file, () => this.runtime))];
-        const f2 = keychain instanceof SwiftKeychainService ? [keychain.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_KeychainService(keychain, () => this.runtime))];
-        const f3 = analytics instanceof SwiftAnalyticsService ? [analytics.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_AnalyticsService(analytics, () => this.runtime))];
-        const f4 = configuration instanceof SwiftConfigurationService ? [configuration.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_ConfigurationService(configuration, () => this.runtime))];
-        this.runtime.call("swift_ffi_platform_services_installPlatformDependencies", f0[0], f0[1], f1[0], f1[1], f2[0], f2[1], f3[0], f3[1], f4[0], f4[1]);
+    installPlatformDependencies(keychain, analytics, configuration) {
+        const f0 = keychain instanceof SwiftKeychainService ? [keychain.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_KeychainService(keychain, () => this.runtime))];
+        const f1 = analytics instanceof SwiftAnalyticsService ? [analytics.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_AnalyticsService(analytics, () => this.runtime))];
+        const f2 = configuration instanceof SwiftConfigurationService ? [configuration.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_ConfigurationService(configuration, () => this.runtime))];
+        this.runtime.call("swift_ffi_platform_services_installPlatformDependencies", f0[0], f0[1], f1[0], f1[1], f2[0], f2[1]);
     }
     installPlatformImagePicker(imagePicker) {
         const f0 = imagePicker instanceof SwiftImagePickerService ? [imagePicker.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_ImagePickerService(imagePicker, () => this.runtime))];
@@ -1802,10 +1604,6 @@ export class SwiftUI {
         const f0 = deviceMotion instanceof SwiftDeviceMotionService ? [deviceMotion.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_DeviceMotionService(deviceMotion, () => this.runtime))];
         this.runtime.call("swift_ffi_platform_services_installPlatformDeviceMotion", f0[0], f0[1]);
     }
-    installPlatformPreferences(preferences) {
-        const f0 = preferences instanceof SwiftPreferencesService ? [preferences.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_PreferencesService(preferences, () => this.runtime))];
-        this.runtime.call("swift_ffi_platform_services_installPlatformPreferences", f0[0], f0[1]);
-    }
     installPlatformTimer(timer) {
         const f0 = timer instanceof SwiftTimerService ? [timer.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_TimerService(timer, () => this.runtime))];
         this.runtime.call("swift_ffi_platform_services_installPlatformTimer", f0[0], f0[1]);
@@ -1814,87 +1612,103 @@ export class SwiftUI {
         const f0 = oauth instanceof SwiftOAuthService ? [oauth.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_OAuthService(oauth, () => this.runtime))];
         this.runtime.call("swift_ffi_platform_services_installPlatformOAuth", f0[0], f0[1]);
     }
-    gpuConnect(host) {
-        const f0 = host instanceof SwiftGPUWebHost ? [host.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_GPUWebHost(host, () => this.runtime))];
-        this.runtime.call("swift_ffi_gpuConnect", f0[0], f0[1]);
+    installIsomerNetworkHosts(http, webSocket) {
+        const f0 = http instanceof SwiftHTTPHost ? [http.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_HTTPHost(http, () => this.runtime))];
+        const f1 = webSocket instanceof SwiftWebSocketHost ? [webSocket.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_WebSocketHost(webSocket, () => this.runtime))];
+        this.runtime.call("swift_ffi_isomer_installIsomerNetworkHosts", f0[0], f0[1], f1[0], f1[1]);
     }
-    uuiSetDisplayScale(scale) {
-        this.runtime.call("swift_ffi_uuiSetDisplayScale", scale);
+    metalConnect(host) {
+        const f0 = host instanceof SwiftMetalWebHost ? [host.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_MetalWebHost(host, () => this.runtime))];
+        this.runtime.call("swift_ffi_metalConnect", f0[0], f0[1]);
     }
-    uuiStart(host, renderer, width, height) {
-        const f0 = host instanceof SwiftWebHost ? [host.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_WebHost(host, () => this.runtime))];
-        const b1 = stageString(this.runtime, renderer);
-        this.runtime.call("swift_ffi_uuiStart", f0[0], f0[1], b1.ptr, b1.len, width, height);
+    metalCompleted(token, readback) {
+        const b1 = stageBytes(this.runtime, readback);
+        this.runtime.call("swift_ffi_metalCompleted", token, b1.ptr, b1.len);
         b1.drop();
     }
-    uuiRender() {
-        this.runtime.call("swift_ffi_uuiRender");
+    isoSetDisplayScale(scale) {
+        this.runtime.call("swift_ffi_isoSetDisplayScale", scale);
     }
-    uuiMapSurfaceRender(id, camera, annotations, polygons, polylines, width, height) {
+    isoStart(host, renderer, width, height) {
+        const f0 = host instanceof SwiftWebHost ? [host.borrowHandle(), 0] : [0, registerForeign(makeDispatcher_WebHost(host, () => this.runtime))];
+        const b1 = stageString(this.runtime, renderer);
+        this.runtime.call("swift_ffi_isoStart", f0[0], f0[1], b1.ptr, b1.len, width, height);
+        b1.drop();
+    }
+    isoRender() {
+        this.runtime.call("swift_ffi_isoRender");
+    }
+    isoMapSurfaceRender(id, camera, annotations, polygons, polylines, width, height) {
         const b0 = stageString(this.runtime, id);
         const b1 = stageString(this.runtime, camera);
         const b2 = stageString(this.runtime, annotations);
         const b3 = stageString(this.runtime, polygons);
         const b4 = stageString(this.runtime, polylines);
-        this.runtime.call("swift_ffi_uuiMapSurfaceRender", b0.ptr, b0.len, b1.ptr, b1.len, b2.ptr, b2.len, b3.ptr, b3.len, b4.ptr, b4.len, width, height);
+        this.runtime.call("swift_ffi_isoMapSurfaceRender", b0.ptr, b0.len, b1.ptr, b1.len, b2.ptr, b2.len, b3.ptr, b3.len, b4.ptr, b4.len, width, height);
         b0.drop();
         b1.drop();
         b2.drop();
         b3.drop();
         b4.drop();
     }
-    uuiSetScenePhase(phase) {
+    isoSetScenePhase(phase) {
         const b0 = stageString(this.runtime, phase);
-        this.runtime.call("swift_ffi_uuiSetScenePhase", b0.ptr, b0.len);
+        this.runtime.call("swift_ffi_isoSetScenePhase", b0.ptr, b0.len);
         b0.drop();
     }
-    uuiSetColorScheme(dark) {
-        this.runtime.call("swift_ffi_uuiSetColorScheme", dark ? 1 : 0);
+    isoSetColorScheme(dark) {
+        this.runtime.call("swift_ffi_isoSetColorScheme", dark ? 1 : 0);
     }
-    uuiOpenURL(url) {
+    isoOpenURL(url) {
         const b0 = stageString(this.runtime, url);
-        this.runtime.call("swift_ffi_uuiOpenURL", b0.ptr, b0.len);
+        this.runtime.call("swift_ffi_isoOpenURL", b0.ptr, b0.len);
         b0.drop();
     }
-    uuiPointerEvent(kind, x, y) {
-        this.runtime.call("swift_ffi_uuiPointerEvent", kind, x, y);
+    isoPointerEvent(kind, x, y) {
+        this.runtime.call("swift_ffi_isoPointerEvent", kind, x, y);
     }
-    uuiWheelEvent(x, y, deltaX, deltaY) {
-        this.runtime.call("swift_ffi_uuiWheelEvent", x, y, deltaX, deltaY);
+    isoWheelEvent(x, y, deltaX, deltaY) {
+        this.runtime.call("swift_ffi_isoWheelEvent", x, y, deltaX, deltaY);
     }
-    uuiResize(width, height) {
-        this.runtime.call("swift_ffi_uuiResize", width, height);
+    isoResize(width, height) {
+        this.runtime.call("swift_ffi_isoResize", width, height);
     }
-    uuiTextChanged(text) {
+    isoTextChanged(text) {
         const b0 = stageString(this.runtime, text);
-        this.runtime.call("swift_ffi_uuiTextChanged", b0.ptr, b0.len);
+        this.runtime.call("swift_ffi_isoTextChanged", b0.ptr, b0.len);
         b0.drop();
     }
-    uuiTextSubmitted() {
-        this.runtime.call("swift_ffi_uuiTextSubmitted");
+    isoTextSubmitted() {
+        this.runtime.call("swift_ffi_isoTextSubmitted");
     }
-    uuiTextEnded() {
-        this.runtime.call("swift_ffi_uuiTextEnded");
+    isoTextEnded() {
+        this.runtime.call("swift_ffi_isoTextEnded");
     }
-    uuiHostEvent(id, value) {
+    isoHostEvent(id, value) {
         const b0 = stageString(this.runtime, id);
         const b1 = stageString(this.runtime, value);
-        this.runtime.call("swift_ffi_uuiHostEvent", b0.ptr, b0.len, b1.ptr, b1.len);
+        this.runtime.call("swift_ffi_isoHostEvent", b0.ptr, b0.len, b1.ptr, b1.len);
         b0.drop();
         b1.drop();
     }
-    uuiKeyEvent(id, value) {
+    isoKeyEvent(id, value) {
         const b0 = stageString(this.runtime, id);
         const b1 = stageString(this.runtime, value);
-        const r = this.runtime.call("swift_ffi_uuiKeyEvent", b0.ptr, b0.len, b1.ptr, b1.len);
+        const r = this.runtime.call("swift_ffi_isoKeyEvent", b0.ptr, b0.len, b1.ptr, b1.len);
         b0.drop();
         b1.drop();
         return r !== 0;
     }
+    isoMetalViewFrame(token, surface) {
+        const b0 = stageString(this.runtime, token);
+        this.runtime.call("swift_ffi_isoMetalViewFrame", b0.ptr, b0.len, surface);
+        b0.drop();
+    }
 }
 /** Instantiates the reactor and returns the bridged API. `wasi`
  * merges over the built-in WASI shim, so a host can extend or
- * replace individual calls (clocks, fds, …) without forking. */
+ * replace individual calls (clocks, fds, …) without forking; a
+ * factory gets the memory accessor and the built-ins. */
 export async function load(wasm, options) {
     let memory;
     let runtime;
@@ -1970,17 +1784,16 @@ export async function load(wasm, options) {
     instance.exports._initialize();
     runtime = new Runtime(instance.exports);
     // Register the interfaces' dependency-proxy factories (docs/wasm_di.md).
-    runtime.call("swift_ffi_platform_services_register_NetworkService");
-    runtime.call("swift_ffi_platform_services_register_FileService");
     runtime.call("swift_ffi_platform_services_register_KeychainService");
     runtime.call("swift_ffi_platform_services_register_AnalyticsService");
     runtime.call("swift_ffi_platform_services_register_ConfigurationService");
     runtime.call("swift_ffi_platform_services_register_ImagePickerService");
     runtime.call("swift_ffi_platform_services_register_DeviceMotionService");
-    runtime.call("swift_ffi_platform_services_register_PreferencesService");
     runtime.call("swift_ffi_platform_services_register_TimerService");
     runtime.call("swift_ffi_platform_services_register_OAuthService");
-    runtime.call("swift_ffi_register_GPUWebHost");
+    runtime.call("swift_ffi_isomer_register_HTTPHost");
+    runtime.call("swift_ffi_isomer_register_WebSocketHost");
+    runtime.call("swift_ffi_register_MetalWebHost");
     runtime.call("swift_ffi_register_WebHost");
     return new SwiftUI(runtime);
 }

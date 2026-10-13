@@ -6,9 +6,8 @@
 // source; the page's host handles the commands (`template:<name>`, `edit`,
 // `playground`).
 
-import PlatformServices
 import SwiftUI
-import SwiftUIExtensions
+import Isomer
 
 @main
 struct SplashApp: App {
@@ -18,8 +17,8 @@ struct SplashApp: App {
 struct SplashPage: View {
     @State private var command = ""
     @State private var commandCount = 0
-    /// The Pokédex's caught record (persisted through the file service).
-    @StateObject private var pokedex = PokedexStore()
+    /// The Pokédex's caught record (kept in the app's Application Support).
+    @State private var pokedex = PokedexStore()
 
     var body: some View {
         ScrollView {
@@ -47,11 +46,11 @@ struct SplashPage: View {
                 section("Pluggable GPUs") {
                     Para("The SwiftGPU renderer draws through a GPU abstraction with pluggable backends — Metal on Apple, OpenGL ES on Android, WebGPU in the browser — and a host can bring its own device. The same abstraction powers SwiftMap, an OpenStreetMap renderer that drops into Isomer apps as a map view on every platform.")
                 }
-                section("Dependency injection") {
-                    Para("Apps reach the platform through injected services rather than platform APIs: networking, files, the keychain, analytics, feature flags, the image picker, device motion. Each is a Swift protocol the host implements natively — URLSession and the Keychain on Apple, HttpURLConnection on Android, fetch and localStorage on the web — and injects at launch, so a feature's business logic is the same everywhere and testable anywhere.")
-                    Para("The Pokédex below uses the network service for the list and artwork, and the file service to remember which Pokémon you have caught — in your browser's storage here, on disk in the native apps.")
-                    DemoCard(title: "Pokédex", template: "Pokédex", note: "Networking + a persisted record through injected services.", send: send) {
-                        NavigationStack { PokedexScreen() }.environmentObject(pokedex)
+                section("Apple's frameworks, everywhere") {
+                    Para("Apps reach the network and their files the way they do on Apple platforms: URLSession, FileManager and UserDefaults from Foundation, with models made @Observable. Off Apple those are Isomer's own Foundation and Observation, in Swift — URLSession over the browser's fetch here and Android's HTTP client there, an app's files in the browser's storage or on disk — so the same source runs everywhere.")
+                    Para("The Pokédex below loads its list and artwork with URLSession and remembers which Pokémon you have caught in a file in its Application Support — in your browser's storage here, on disk in the native apps.")
+                    DemoCard(title: "Pokédex", template: "Pokédex", note: "URLSession and a file kept in Application Support.", send: send) {
+                        NavigationStack { PokedexScreen() }.environment(pokedex)
                     }
                 }
                 section("Try it") {

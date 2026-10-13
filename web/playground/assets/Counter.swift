@@ -1,6 +1,7 @@
 // Counter — as a Playground project. Same source as the example apps'.
 import SwiftUI
-import SwiftUIExtensions
+import Isomer
+import Observation
 
 @main
 struct CounterApp: App {

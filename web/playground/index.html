@@ -24,92 +24,25 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <script src="./runtime/react.production.min.js?v=3836754679"></script>
-  <script src="./runtime/react-dom.production.min.js?v=3836754679"></script>
+  <script src="./runtime/react.production.min.js?v=1882615545"></script>
+  <script src="./runtime/react-dom.production.min.js?v=1882615545"></script>
   <script type="module">
     // Surface uncaught errors on the page (no devtools on a phone).
     const showError = (message) => {
-      let box = document.getElementById("uui-error");
-      if (!box) { box = document.createElement("pre"); box.id = "uui-error"; box.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;max-height:40%;overflow:auto;margin:0;padding:10px;font:12px monospace;color:#fff;background:#b00;border-radius:8px;z-index:2000;white-space:pre-wrap"; document.body.appendChild(box); }
+      let box = document.getElementById("iso-error");
+      if (!box) { box = document.createElement("pre"); box.id = "iso-error"; box.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;max-height:40%;overflow:auto;margin:0;padding:10px;font:12px monospace;color:#fff;background:#b00;border-radius:8px;z-index:2000;white-space:pre-wrap"; document.body.appendChild(box); }
       box.textContent += message + "\n";
     };
     window.addEventListener("error", (e) => showError((e.message || String(e.error)) + (e.error && e.error.stack ? "\n" + String(e.error.stack).split("\n").slice(0, 6).join("\n") : "")));
     window.addEventListener("unhandledrejection", (e) => showError("unhandled: " + (e.reason && e.reason.stack ? String(e.reason.stack).split("\n").slice(0, 6).join("\n") : String(e.reason))));
-    import { boot } from "./runtime/boot.js?v=3836754679";
-    import { Dependencies } from "./app_bridge.js?v=3836754679";
-    import { createRunner } from "./hot_runner.js?v=3836754679";
+    import { boot } from "./runtime/boot.js?v=1882615545";
+    import { Dependencies } from "./app_bridge.js?v=1882615545";
+    import { createRunner } from "./hot_runner.js?v=1882615545";
 
     // --- Platform services (docs/wasm_di.md): browser implementations ----
     const sandbox = "isomer.playground.";
     const toBase64 = (bytes) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
     const fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-    // Site assets (the sample templates) are readable as files under assets/.
-    const servedCache = new Map();
-    function servedGet(path, headOnly) {
-      if (!path.startsWith("assets/")) return null;
-      if (servedCache.has(path)) return headOnly ? true : servedCache.get(path);
-      try {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", "./" + path, false);
-        xhr.overrideMimeType("text/plain; charset=x-user-defined");
-        xhr.send(null);
-        if (xhr.status !== 200) return null;
-        const text = xhr.responseText, bytes = new Uint8Array(text.length);
-        for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
-        servedCache.set(path, bytes);
-        return headOnly ? true : bytes;
-      } catch (_) { return null; }
-    }
-    const fileService = {
-      list(path) {
-        const prefix = sandbox + "file:" + (path ? path.replace(/\/+$/, "") + "/" : "");
-        const names = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith(prefix)) names.push(key.slice((sandbox + "file:").length));
-        }
-        return names.sort();
-      },
-      exists(path) { return localStorage.getItem(sandbox + "file:" + path) !== null || servedGet(path, true) !== null; },
-      read(path) {
-        const stored = localStorage.getItem(sandbox + "file:" + path);
-        if (stored !== null) return fromBase64(stored);
-        const served = servedGet(path, false);
-        if (served === null) throw new Error("no such file: " + path);
-        return served;
-      },
-      write(path, contents) { try { localStorage.setItem(sandbox + "file:" + path, toBase64(contents)); return true; } catch (_) { return false; } },
-      delete(path) { localStorage.removeItem(sandbox + "file:" + path); return true; },
-      url(path) {
-        if (servedGet(path, true) !== null) return new URL("./" + path, location.href).href;
-        const stored = localStorage.getItem(sandbox + "file:" + path);
-        if (stored === null) return "";
-        const ext = (path.split(".").pop() || "").toLowerCase();
-        const mime = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" }[ext] || "application/octet-stream";
-        return "data:" + mime + ";base64," + stored;
-      },
-    };
-    const networking = {
-      async request(url, method) {
-        const response = await fetch(url, { method: method || "GET" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return new Uint8Array(await response.arrayBuffer());
-      },
-      async send(url, method, headers, body) {
-        const h = {}; for (const line of String(headers || "").split("\n")) { const i = line.indexOf(":"); if (i > 0) h[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
-        const response = await fetch(url, { method: method || "GET", headers: h, body: body && body.length ? body : undefined });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return new Uint8Array(await response.arrayBuffer());
-      },
-      async perform(url, method, headers, body) {
-        const h = {}; for (const line of String(headers || "").split("\n")) { const i = line.indexOf(":"); if (i > 0) h[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
-        const response = await fetch(url, { method: method || "GET", headers: h, body: body && body.length ? body : undefined });
-        const lines = []; response.headers.forEach((value, name) => lines.push(name + ": " + value)); lines.sort();
-        const head = new TextEncoder().encode(response.status + "\n" + lines.join("\n") + "\n\n");
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        const out = new Uint8Array(head.length + bytes.length); out.set(head, 0); out.set(bytes, head.length); return out;
-      },
-    };
     const imagePicker = {
       pickImage(maxDimension) {
         return new Promise((resolve) => {
@@ -161,21 +94,16 @@
     window.addEventListener("keydown", (event) => { if (event.key === "Escape" && shakeWaiters.length) { event.preventDefault(); fireShake(); } });
     window.__playgroundShake = fireShake;
 
-    // Preferences: localStorage, one namespace for the page and its builds.
-    const preferences = {
-      get(key) { return localStorage.getItem(sandbox + "preferences:" + key) || ""; },
-      set(key, value) { if (value) localStorage.setItem(sandbox + "preferences:" + key, value); else localStorage.removeItem(sandbox + "preferences:" + key); },
-    };
+    // The renderer choice: read here before boot, so the page keeps it
+    // (Settings sets it through the host).
+    const rendererKey = sandbox + "preferences:renderer";
+    const storedRenderer = () => localStorage.getItem(rendererKey) || "";
+    const storeRenderer = (value) => { if (value) localStorage.setItem(rendererKey, value); else localStorage.removeItem(rendererKey); };
 
-    // The services the USER's build sees while it runs (same table).
+    // The services the USER's build sees while it runs. Its network and files
+    // are Foundation's (the runtime's fetch and IndexedDB), its home its
+    // project's (hot_runner.js passes the bundle identifier).
     const runDependencies = {
-      networking: Dependencies.networkService(() => networking),
-      file: Dependencies.fileService(() => ({ ...fileService,
-        // A build's sandbox is its own namespace.
-        list: (p) => fileService.list("run/" + p).map((n) => n.replace(/^run\//, "")),
-        exists: (p) => fileService.exists("run/" + p), read: (p) => fileService.read("run/" + p),
-        write: (p, c) => fileService.write("run/" + p, c), delete: (p) => fileService.delete("run/" + p),
-        url: (p) => fileService.url("run/" + p) })),
       keychain: Dependencies.keychainService(() => ({
         async get(key) { const v = localStorage.getItem(sandbox + "run-keychain:" + key); if (v === null) throw new Error("absent"); return fromBase64(v); },
         async set(value, key) { localStorage.setItem(sandbox + "run-keychain:" + key, toBase64(value)); },
@@ -185,14 +113,13 @@
       configuration: Dependencies.configurationService(() => ({ flag(key) { return key === "promo_banner"; } })),
       imagePicker: Dependencies.imagePickerService(() => imagePicker),
       deviceMotion: Dependencies.deviceMotionService(() => deviceMotion),
-      preferences: Dependencies.preferencesService(() => preferences),
     };
 
     // --- The Playground host service: compile (worker), run (overlay), chat ----
     const runner = createRunner({ dependencies: runDependencies });
     // The app's run cover hosts the build: its `surface` host view mounts here.
-    window.uuiSurfaceMount = (name, element, send) => { if (name === "run") runner.mount(element, send); };
-    const worker = new Worker("./compiler_worker.js?v=3836754679", { type: "module" });
+    window.isoSurfaceMount = (name, element, send) => { if (name === "run") runner.mount(element, send); };
+    const worker = new Worker("./compiler_worker.js?v=1882615545", { type: "module" });
     const pending = new Map();
     let nextID = 1;
     worker.onmessage = (event) => {
@@ -213,9 +140,9 @@
         if (result.ok) { lastBuild = result.wasm; return ""; }
         return result.diagnostics || "compile failed";
       },
-      async run() {
+      async run(project) {
         if (!lastBuild) throw new Error("no successful build yet");
-        return runner.run(lastBuild);
+        return runner.run(lastBuild, "dev.isomer.playground.run." + project);
       },
       stop() { runner.stop(); },
       logs() { return runner.logs(); },
@@ -241,6 +168,20 @@
       hasKey() { return !!localStorage.getItem(keyName); },
       setKey(key) { if (key) localStorage.setItem(keyName, key); else localStorage.removeItem(keyName); },
       requestedTemplate() { return new URLSearchParams(location.search).get("template") || ""; },
+      // The projects as the page kept them before 0.31 (its file service, in
+      // localStorage): path -> base64, read once by the app's store. Left in
+      // place, in case a 0.30 page is opened again.
+      legacyFiles() {
+        const files = {};
+        const prefix = sandbox + "file:";
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(prefix + "playground/")) files[key.slice(prefix.length)] = localStorage.getItem(key);
+        }
+        return JSON.stringify(files);
+      },
+      renderer() { return storedRenderer(); },
+      setRenderer(value) { storeRenderer(value); },
       toolchainStatus() {
         return toolchainStatus === "wasm" ? "In-browser Swift toolchain (swift-frontend.wasm)"
           : toolchainStatus === "dev" ? "Dev compile server (host toolchain)"
@@ -251,14 +192,11 @@
     // Dev hook: headless verification drives the host directly.
     window.__playgroundHost = host;
     const dependencies = {
-      networking: Dependencies.networkService(() => networking),
-      file: Dependencies.fileService(() => fileService),
       keychain: runDependencies.keychain,
       analytics: runDependencies.analytics,
       configuration: runDependencies.configuration,
       imagePicker: Dependencies.imagePickerService(() => imagePicker),
       deviceMotion: Dependencies.deviceMotionService(() => deviceMotion),
-      preferences: Dependencies.preferencesService(() => preferences),
       host: Dependencies.playgroundHostService(() => host),
     };
     // React (real DOM: text fields, scrolling) unless Settings chose the
@@ -266,9 +204,11 @@
     // `?renderer=react|webGPU` overrides the stored preference (and stores
     // it) — the way back if a renderer cannot show Settings.
     const forced = new URLSearchParams(location.search).get("renderer");
-    if (forced === "react" || forced === "webGPU") preferences.set("renderer", forced === "webGPU" ? "gpu" : "native");
-    const rendererName = preferences.get("renderer") === "gpu" ? "webGPU" : "react";
-    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=3836754679", rendererName, dependencies })
+    if (forced === "react" || forced === "webGPU") storeRenderer(forced === "webGPU" ? "gpu" : "native");
+    const rendererName = storedRenderer() === "gpu" ? "webGPU" : "react";
+    // The Playground's own files (its projects) are kept under its bundle
+    // identifier; each run's under its project's.
+    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=1882615545", rendererName, dependencies, bundleIdentifier: "dev.isomer.playground" })
       .catch((error) => { document.body.insertAdjacentHTML("beforeend", '<pre id="error"></pre>'); document.getElementById("error").textContent = String(error); });
   </script>
 </body>

@@ -1,5 +1,11 @@
 [
   {
+    "version": "v4",
+    "url": "v4.wasm",
+    "notes": "hot demo, rebuilt for Isomer 0.31 (the iso_hot entry points)",
+    "published": "2026-10-13T04:48:13Z"
+  },
+  {
     "version": "v3",
     "url": "v3.wasm",
     "notes": "Snapchat mock (safe area + keyboard fixes)",
