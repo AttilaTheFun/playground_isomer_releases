@@ -14,8 +14,8 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <script src="./runtime/react.production.min.js?v=376680878"></script>
-  <script src="./runtime/react-dom.production.min.js?v=376680878"></script>
+  <script src="./runtime/react.production.min.js?v=116698865"></script>
+  <script src="./runtime/react-dom.production.min.js?v=116698865"></script>
   <script type="module">
     // Surface uncaught errors on the page (no devtools on a phone).
     const showError = (message) => {
@@ -25,10 +25,10 @@
     };
     window.addEventListener("error", (e) => showError((e.message || String(e.error)) + (e.error && e.error.stack ? "\n" + String(e.error.stack).split("\n").slice(0, 6).join("\n") : "")));
     window.addEventListener("unhandledrejection", (e) => showError("unhandled: " + (e.reason && e.reason.stack ? String(e.reason.stack).split("\n").slice(0, 6).join("\n") : String(e.reason))));
-    import { boot } from "./runtime/boot.js?v=376680878";
+    import { boot } from "./runtime/boot.js?v=116698865";
     // The demo runs use the Playground's service builders (its bridge links
     // the platform services; the splash's own does not).
-    import { Dependencies } from "./playground/app_bridge.js?v=376680878";
+    import { Dependencies } from "./playground/app_bridge.js?v=116698865";
 
     // The inline examples reach the network and their files through Foundation
     // (URLSession over fetch, FileManager over IndexedDB: the runtime's own);
@@ -55,7 +55,7 @@
       else if (command.startsWith("template:")) location.href = "./playground/?template=" + encodeURIComponent(command.slice(9));
     };
 
-    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=376680878", rendererName: "react", dependencies: runDependencies, bundleIdentifier: "dev.isomer.splash" })
+    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=116698865", rendererName: "react", dependencies: runDependencies, bundleIdentifier: "dev.isomer.splash" })
       .catch((error) => { document.body.insertAdjacentHTML("beforeend", '<pre id="error"></pre>'); document.getElementById("error").textContent = String(error); });
   </script>
 </body>

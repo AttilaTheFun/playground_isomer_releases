@@ -24,8 +24,8 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <script src="./runtime/react.production.min.js?v=878919564"></script>
-  <script src="./runtime/react-dom.production.min.js?v=878919564"></script>
+  <script src="./runtime/react.production.min.js?v=529913817"></script>
+  <script src="./runtime/react-dom.production.min.js?v=529913817"></script>
   <script type="module">
     // Surface uncaught errors on the page (no devtools on a phone).
     const showError = (message) => {
@@ -35,9 +35,9 @@
     };
     window.addEventListener("error", (e) => showError((e.message || String(e.error)) + (e.error && e.error.stack ? "\n" + String(e.error.stack).split("\n").slice(0, 6).join("\n") : "")));
     window.addEventListener("unhandledrejection", (e) => showError("unhandled: " + (e.reason && e.reason.stack ? String(e.reason.stack).split("\n").slice(0, 6).join("\n") : String(e.reason))));
-    import { boot } from "./runtime/boot.js?v=878919564";
-    import { Dependencies } from "./app_bridge.js?v=878919564";
-    import { createRunner } from "./hot_runner.js?v=878919564";
+    import { boot } from "./runtime/boot.js?v=529913817";
+    import { Dependencies } from "./app_bridge.js?v=529913817";
+    import { createRunner } from "./hot_runner.js?v=529913817";
 
     // --- Platform services (docs/wasm_di.md): browser implementations ----
     const sandbox = "isomer.playground.";
@@ -119,7 +119,7 @@
     const runner = createRunner({ dependencies: runDependencies });
     // The app's run cover hosts the build: its `surface` host view mounts here.
     window.isoSurfaceMount = (name, element, send) => { if (name === "run") runner.mount(element, send); };
-    const worker = new Worker("./compiler_worker.js?v=878919564", { type: "module" });
+    const worker = new Worker("./compiler_worker.js?v=529913817", { type: "module" });
     const pending = new Map();
     let nextID = 1;
     worker.onmessage = (event) => {
@@ -208,7 +208,7 @@
     const rendererName = storedRenderer() === "gpu" ? "webGPU" : "react";
     // The Playground's own files (its projects) are kept under its bundle
     // identifier; each run's under its project's.
-    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=878919564", rendererName, dependencies, bundleIdentifier: "dev.isomer.playground" })
+    boot({ canvas: document.getElementById("canvas"), wasmURL: "./app.wasm?v=529913817", rendererName, dependencies, bundleIdentifier: "dev.isomer.playground" })
       .catch((error) => { document.body.insertAdjacentHTML("beforeend", '<pre id="error"></pre>'); document.getElementById("error").textContent = String(error); });
   </script>
 </body>
